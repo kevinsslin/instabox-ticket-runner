@@ -45,7 +45,7 @@ phone disconnects; this CLI does not itself supply a supervisor.
    review edits. PR publication/mapping is not automated by this controller;
    report missing PR proof precisely and follow existing publication authority.
 7. Once work has stopped, checkpoint TICKET saves the latest Codex bundle in
-   the OS store, removes the guest auth file, pauses VM and releases its lease.
+   the configured store, removes the guest auth file, pauses VM and releases its lease.
    Failed handoff retains state/lease; use README recovery. Do not delete the
    only work or credential copy, edit SQLite or clear locks to bypass errors.
 

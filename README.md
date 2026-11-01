@@ -109,7 +109,7 @@ Later runs retain the same conversation and its original cwd; include any
 intended directory change in the prompt. PR publishing/mapping is not automated.
 
 Checkpoint refuses running or unknown jobs/agents, saves the latest Codex bundle
-and verifies identical read-back from the OS store before removing guest auth,
+and verifies identical read-back from the configured store before removing guest auth,
 pausing the VM and releasing its profile. It resumes an idle-paused VM first
 because process listings while paused can be cached.
 Next run restores the latest bundle. File deletion is not secure disk erasure;

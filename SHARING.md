@@ -9,8 +9,10 @@ repo access, one ticket/branch/PR, review edits on the same VM, interrupted-cont
 recovery and a second user's independent onboarding. Record actual cost and timing.
 Clean-clone installation on the author's computer is not second-user proof.
 
-Current limits: single trusted host, serialized Codex profiles, native OS credential
-store, dependency on Instabox CLI. Long-term refresh, automated PR publishing,
+Current limits: single trusted host, serialized Codex profiles, a provisioned
+native or encrypted-file credential store, dependency on Instabox CLI. Actual
+phone-to-bot operation and unattended supervision still need host verification.
+Long-term refresh, automated PR publishing,
 cancellation and safe deletion are still pending. Read VALIDATION.md before claims.
 
 For a short demo show the requested task, bot command, VM, tests/diff, PR and review
