@@ -58,9 +58,12 @@ trial, not part of the controller test suite.
 The primary deployment target is a phone-operated bot with a persistent controller
 host. It must continue while the operator's laptop is offline. Current macOS
 Keychain and unlocked GNOME collection checks validate desktop adapters, not a
-headless production deployment. Selection and implementation of the server
-credential backend, actual bot dispatch, monitoring and automatic checkpointing
-remain required before the mobile workflow can be claimed to work.
+headless production deployment. The encrypted-file backend now provides
+authenticated encrypted bundles using a separately provisioned private key file.
+Local tests cover restart read-back, immutable versions, tampering, wrong keys,
+identity substitution, permissions, symlinks and lease retention on key loss.
+Actual bot-host key provisioning, phone dispatch, monitoring and automatic
+checkpointing remain required before the mobile workflow can be claimed to work.
 
 Natural token expiry/refresh, end-to-end Go auth/coding revision proof, private
 repo access, real project checks, PR publication, actual bot discovery/invocation,

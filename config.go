@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,15 +14,17 @@ import (
 )
 
 type Config struct {
-	User     string   `yaml:"user"`
-	Org      string   `yaml:"org"`
-	Provider string   `yaml:"provider"`
-	Repo     string   `yaml:"repo"`
-	Base     string   `yaml:"base"`
-	Snapshot string   `yaml:"snapshot"`
-	VCPUs    int      `yaml:"vcpus"`
-	Memory   int      `yaml:"mem_mib"`
-	Secrets  []string `yaml:"secrets"`
+	User              string   `yaml:"user"`
+	Org               string   `yaml:"org"`
+	Provider          string   `yaml:"provider"`
+	Repo              string   `yaml:"repo"`
+	Base              string   `yaml:"base"`
+	Snapshot          string   `yaml:"snapshot"`
+	VCPUs             int      `yaml:"vcpus"`
+	Memory            int      `yaml:"mem_mib"`
+	Secrets           []string `yaml:"secrets"`
+	CredentialBackend string   `yaml:"credential_backend"`
+	CredentialKeyFile string   `yaml:"credential_key_file"`
 }
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$`)
@@ -63,7 +66,7 @@ func loadConfig(path string, env func(string) (string, bool)) (Config, error) {
 		}
 		c = v
 	}
-	for k, p := range map[string]*string{"USER": &c.User, "ORG": &c.Org, "PROVIDER": &c.Provider, "REPO": &c.Repo, "BASE": &c.Base, "SNAPSHOT": &c.Snapshot} {
+	for k, p := range map[string]*string{"USER": &c.User, "ORG": &c.Org, "PROVIDER": &c.Provider, "REPO": &c.Repo, "BASE": &c.Base, "SNAPSHOT": &c.Snapshot, "CREDENTIAL_BACKEND": &c.CredentialBackend, "CREDENTIAL_KEY_FILE": &c.CredentialKeyFile} {
 		if v, ok := env("IB_TICKET_" + k); ok {
 			*p = v
 		}
@@ -89,6 +92,18 @@ func loadConfig(path string, env func(string) (string, bool)) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	switch c.CredentialBackend {
+	case "", "native":
+		if c.CredentialKeyFile != "" {
+			return errors.New("credential_key_file requires encrypted-file backend")
+		}
+	case "encrypted-file":
+		if !filepath.IsAbs(expandHome(c.CredentialKeyFile)) {
+			return errors.New("encrypted-file backend requires absolute credential_key_file path")
+		}
+	default:
+		return errors.New("credential_backend must be native or encrypted-file")
+	}
 	for _, s := range []string{c.User, c.Org} {
 		if s != "" {
 			if e := validID(s); e != nil {

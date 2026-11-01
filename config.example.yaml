@@ -11,3 +11,7 @@ mem_mib: 4096
 # Select existing org Secrets explicitly for private GitHub access:
 secrets: []
 # secrets: [GH_TOKEN]
+# Default desktop store. For a headless bot host, see docs/deployment.md:
+credential_backend: native
+# credential_backend: encrypted-file
+# credential_key_file: /run/credentials/ib-ticket.service/master.key

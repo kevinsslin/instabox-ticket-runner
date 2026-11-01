@@ -16,6 +16,13 @@ contains settings and selected Secret names, not values. Environment overrides
 and flags are for the same non-secret settings. Bind profile/workspace to the
 actual caller; a user string in task text is not authorization.
 
+For phone-driven tasks, execute on the bot's persistent trusted host. Headless
+hosts can select encrypted-file with a privately provisioned key-file reference;
+read docs/deployment.md in the repo. Inspect existing key provisioning before
+init-key, which never replaces an existing file. Never read key bytes into model
+context. A durable bot job must follow events and finish checkpointing after the
+phone disconnects; this CLI does not itself supply a supervisor.
+
 ## Workflow
 
 1. Inspect status TICKET. Distinguish unknown ticket from provider/auth failure;
@@ -49,7 +56,8 @@ keys, not multi-user authorization. Its process lock is not distributed. Keep
 configuration and state private and never snapshot/fork credential-bearing task
 VMs for distribution. Shared tool/dependency snapshots are optional and clean.
 
-The program handles Codex credentials through native OS storage and private file
+The program handles Codex credentials through the configured native or encrypted
+file store and private file
 transport. Do not print bundles, put them in prompts/argv, reuse stale seeds or
 run concurrent writers. Claude uses official login in the user's own VM; do not
 collect, export or centrally distribute its subscription tokens.

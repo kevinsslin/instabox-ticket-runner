@@ -18,6 +18,7 @@ func help() {
 
 Commands:
   version                         Print controller version
+  init-key                        Generate a private headless-store key (never overwrite)
   bootstrap                       Create dedicated official Codex login VM
   create --ticket ID              Create one task VM (configurable user/org/size)
   prepare ID                      Clone configured repository and create task branch
@@ -123,6 +124,8 @@ func execute(args []string) (any, error) {
 	cwd := f.String("cwd", "/data/home", "")
 	model := f.String("model", "", "")
 	conv := f.String("conversation", "", "")
+	backend := f.String("credential-backend", c.CredentialBackend, "")
+	keyFile := f.String("credential-key-file", c.CredentialKeyFile, "")
 	reordered, e := reorder(args[1:])
 	if e != nil {
 		return nil, e
@@ -142,8 +145,19 @@ func execute(args []string) (any, error) {
 	c.Snapshot = *snapshot
 	c.VCPUs = *cpu
 	c.Memory = *memory
+	c.CredentialBackend = *backend
+	c.CredentialKeyFile = *keyFile
 	if e = c.Validate(); e != nil {
 		return nil, e
+	}
+	if action == "init-key" {
+		if len(f.Args()) != 0 || c.CredentialBackend != "encrypted-file" {
+			return nil, errors.New("init-key requires encrypted-file configuration and no positional arguments")
+		}
+		if e := initCredentialKey(expandHome(c.CredentialKeyFile)); e != nil {
+			return nil, e
+		}
+		return map[string]string{"status": "key-created"}, nil
 	}
 	valid := map[string]bool{"create": true, "bootstrap": true, "status": true, "prepare": true, "run": true, "activate": true, "checkpoint": true, "reconcile": true, "recover-prepare": true, "recover-turn": true}
 	if !valid[action] {
@@ -163,7 +177,11 @@ func execute(args []string) (any, error) {
 		return nil, e
 	}
 	defer s.Close()
-	r := Runner{State: s, Client: Instabox{}, Secrets: &OSSecrets{service: "instabox-ticket/" + s.Namespace}}
+	var secrets Secrets = &OSSecrets{service: "instabox-ticket/" + s.Namespace}
+	if c.CredentialBackend == "encrypted-file" {
+		secrets = &EncryptedSecrets{KeyFile: expandHome(c.CredentialKeyFile), Dir: filepath.Join(s.Root, "credentials"), Namespace: s.Namespace}
+	}
+	r := Runner{State: s, Client: Instabox{}, Secrets: secrets}
 	switch action {
 	case "create":
 		return r.Create(*ticketFlag, c, false)

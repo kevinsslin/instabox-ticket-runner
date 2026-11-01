@@ -9,14 +9,15 @@ No account-specific configuration, credentials or VM snapshots are distributed.
 
 The intended bot workflow starts from a phone. A persistent controller host must
 handle dispatch, monitoring and checkpointing without the operator's laptop.
-The current native credential-store adapters are desktop prototypes; headless
-account-bundle storage and the complete mobile bot workflow are not implemented.
+Headless hosts can select encrypted-file bundle storage with a separately
+provisioned private key file. Background supervision and the complete mobile
+bot workflow are not yet verified on a real bot host.
 See [deployment boundaries](docs/deployment.md) before setting up a bot host.
 
 ## Install
 
-Requires an authenticated Instabox CLI, macOS or Linux, and a native credential
-store (macOS Keychain or Linux Secret Service). Build from source with Go 1.26.10+;
+Requires an authenticated Instabox CLI and macOS or Linux. Choose a native desktop
+credential store or the headless encrypted-file backend. Build with Go 1.26.10+;
 macOS builds need CGO and Xcode Command Line Tools for native Keychain access.
 No Python, uv or Node runtime is required by the controller or skill.
 
@@ -30,7 +31,7 @@ go test ./...
 ```
 
 The binary still delegates VM operations to the installed Instabox CLI.
-No prebuilt release or Windows support is claimed. Linux builds need a reachable
+No prebuilt release or Windows support is claimed. Linux native storage needs a reachable
 Secret Service with an existing unlocked GNOME login collection. Item names
 include the controller namespace. Do not fall back to plaintext on a headless host.
 Keep the checkout at a stable trusted path. Rebuilding or moving a macOS binary
@@ -44,6 +45,12 @@ Copy config.example.yaml outside the repo, for example to
 ~/.config/instabox-ticket-runner/config.yaml, and fill in your settings.
 Token values do not belong in YAML or IB_TICKET_* variables. The secrets list
 contains only names of existing Instabox org Secrets.
+
+For a bot on its own host, set credential_backend to encrypted-file and
+credential_key_file to an absolute private file path. Initialize a new key with
+init-key on that host, or provision it through the host's secret manager. No key
+bytes are printed. Do not replace a key used by existing bundles. The default
+native backend retains the desktop behavior. See docs/deployment.md.
 
 ```yaml
 user: your-profile
@@ -61,6 +68,8 @@ Use --config PATH or IB_TICKET_CONFIG to select YAML. Supported settings map to
 IB_TICKET_USER, ORG, PROVIDER, REPO, BASE, SNAPSHOT, VCPUS, MEM_MIB and SECRETS
 under the same prefix. IB_TICKET_SECRETS is a comma-separated list of names.
 IB_TICKET_STATE selects the state directory. There is no automatic .env loader.
+IB_TICKET_CREDENTIAL_BACKEND and IB_TICKET_CREDENTIAL_KEY_FILE select the store
+and key reference; --credential-backend and --credential-key-file override them.
 Unknown YAML fields and multiple documents are rejected, without echoing values.
 Use a permitted VM size. A clean dependency snapshot is optional.
 
@@ -118,7 +127,8 @@ call before assigning a real ticket; skill installation is not integration proof
 ## Credential and execution boundaries
 
 SQLite stores metadata/version references/leases under
-~/.local/state/instabox-ticket-runner (0700). Token bytes live in the OS store;
+~/.local/state/instabox-ticket-runner (0700). Token bytes live in the selected
+native store or authenticated encrypted files in that directory's credentials subdirectory;
 private temporary files and Instabox's file transport move bundles. They do not
 enter command arguments, task prompts or logs. Task text reaches the Instabox CLI
 through stdin; native conversation/event files still contain it inside the VM.

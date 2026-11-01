@@ -44,9 +44,14 @@ type State struct {
 	DB        *sql.DB
 	lock      *flock.Flock
 	Namespace string
+	Root      string
 }
 
 func openState(root string) (*State, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, errors.New("cannot resolve state directory")
+	}
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return nil, err
 	}
@@ -68,7 +73,7 @@ func openState(root string) (*State, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &State{DB: db, lock: l}
+	s := &State{DB: db, lock: l, Root: root}
 	fail := func(e error) (*State, error) { s.Close(); return nil, e }
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS profiles(user TEXT PRIMARY KEY,version TEXT NOT NULL);
