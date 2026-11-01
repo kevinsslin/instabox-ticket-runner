@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"regexp"
@@ -78,6 +79,9 @@ func (r *Runner) Create(ticket string, c Config, bootstrap bool) (Task, error) {
 	if e = r.Client.Call(&b, args...); e != nil {
 		return t, e
 	}
+	if b.ID == "" || b.Org != t.Org || b.Metadata["ticket"] != ticket || b.Metadata["controller"] != r.State.Namespace || b.Vault {
+		return t, errors.New("create response missing ownership; reconcile before retrying")
+	}
 	t.Box = b.ID
 	t.Phase = "created"
 	if e = r.State.Save(t); e != nil {
@@ -110,15 +114,29 @@ func (r *Runner) Reconcile(ticket string) (Task, error) {
 				matches = append(matches, b)
 			}
 		}
-		if len(matches) != 1 || matches[0].State != "running" {
-			return t, errors.New("cannot reconcile exactly one running owned VM")
+		if len(matches) != 1 || matches[0].Vault || (matches[0].State != "running" && matches[0].State != "suspended") {
+			return t, errors.New("cannot reconcile exactly one running or suspended isolated owned VM")
 		}
 		t.Box = matches[0].ID
+		// Persist the discovered VM before any further remote mutation.
+		t.Phase = "created"
+		if e = r.State.Save(t); e != nil {
+			return t, e
+		}
 	} else {
 		return t, nil
 	}
-	if e = r.Client.Call(nil, "suspend", t.Box); e != nil {
+	b, e := r.owned(t)
+	if e != nil {
 		return t, e
+	}
+	if b.State != "suspended" {
+		if b.State != "running" {
+			return t, errors.New("VM not ready for reconciliation")
+		}
+		if e = r.Client.Call(nil, "suspend", t.Box); e != nil {
+			return t, e
+		}
 	}
 	t.Phase = "paused"
 	return t, r.State.Save(t)
@@ -223,15 +241,21 @@ func (r *Runner) conversations(box string) ([]Conversation, error) {
 		Conversations []Conversation `json:"conversations"`
 	}
 	e := r.Client.Call(&v, "agent", "ls", box)
+	if e == nil && v.Conversations == nil {
+		e = errors.New("missing conversation list; refusing to assume idle")
+	}
 	return v.Conversations, e
 }
 func (r *Runner) Run(ticket, prompt, cwd, model string) (StartResult, error) {
 	var result StartResult
+	if strings.TrimSpace(prompt) == "" || len(prompt) > 256*1024 {
+		return result, errors.New("task text must contain 1 to 262144 bytes")
+	}
 	t, e := r.Activate(ticket)
 	if e != nil {
 		return result, e
 	}
-	check := `set +u; for name in OPENAI_API_KEY CODEX_API_KEY CODEX_ACCESS_TOKEN OPENAI_BASE_URL ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY; do test -z "${!name}" || exit 1; done`
+	check := `set -e; set +u; test "${CODEX_HOME:-/data/home/.codex}" = /data/home/.codex; test "${CLAUDE_CONFIG_DIR:-/data/home/.claude}" = /data/home/.claude; for name in OPENAI_API_KEY CODEX_API_KEY CODEX_ACCESS_TOKEN OPENAI_BASE_URL ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY; do test -z "${!name}" || exit 1; done`
 	if _, e = r.Client.Shell(t.Box, check); e != nil {
 		return result, e
 	}
@@ -247,7 +271,7 @@ func (r *Runner) Run(ticket, prompt, cwd, model string) (StartResult, error) {
 		return result, e
 	}
 	for _, v := range convs {
-		if v.Status == "running" {
+		if !idleConversation(v.Status) {
 			return result, errors.New("agent already running; follow existing conversation")
 		}
 	}
@@ -264,7 +288,7 @@ func (r *Runner) Run(ticket, prompt, cwd, model string) (StartResult, error) {
 	if e = r.State.Save(t); e != nil {
 		return result, e
 	}
-	if e = r.Client.Call(&result, append(args, prompt)...); e != nil {
+	if e = r.Client.Prompt(&result, prompt, args...); e != nil {
 		return result, e
 	}
 	if result.ID == "" {
@@ -349,14 +373,19 @@ func (r *Runner) RecoverPrepare(ticket string) (Task, error) {
 	return t, r.State.Save(t)
 }
 
-var codingProcess = regexp.MustCompile(`(^|[ /])(codex|claude)([ /]|$)`)
+var codingProcess = regexp.MustCompile(`(^|[ /])(codex|claude|claude-code)([ /.]|$)`)
+
+func idleConversation(status string) bool {
+	return status == "idle" || status == "interrupted" || status == "lost" || strings.HasPrefix(status, "failed(")
+}
 
 func (r *Runner) Checkpoint(ticket string) (Task, error) {
 	t, e := r.State.Task(ticket)
 	if e != nil {
 		return t, e
 	}
-	if _, e = r.owned(t); e != nil {
+	b, e := r.owned(t)
+	if e != nil {
 		return t, e
 	}
 	if t.Phase == "paused" {
@@ -370,13 +399,25 @@ func (r *Runner) Checkpoint(ticket string) (Task, error) {
 			return t, e
 		}
 	}
+	if t.Phase != "credentials-removed" {
+		// Paused process listings are cached. Resume before checking live work
+		// or removing auth after a previously completed save.
+		if b.State == "suspended" {
+			if e = r.Client.Call(nil, "resume", t.Box, "--no-vault"); e != nil {
+				return t, e
+			}
+			b.State = "running"
+		} else if b.State != "running" {
+			return t, errors.New("checkpoint needs a running or suspended VM; preserve lease and inspect")
+		}
+	}
 	if t.Phase == "active" {
 		vs, e := r.conversations(t.Box)
 		if e != nil {
 			return t, e
 		}
 		for _, v := range vs {
-			if v.Status == "running" {
+			if !idleConversation(v.Status) {
 				return t, errors.New("agent still running; preserve lease")
 			}
 		}
@@ -388,8 +429,11 @@ func (r *Runner) Checkpoint(ticket string) (Task, error) {
 		if e = r.Client.Call(&jobs, "jobs", "ls", t.Box); e != nil {
 			return t, e
 		}
+		if jobs.Jobs == nil {
+			return t, errors.New("missing job list; preserve lease")
+		}
 		for _, j := range jobs.Jobs {
-			if j.Status == "running" {
+			if j.Status != "exited" && j.Status != "lost" {
 				return t, errors.New("job still running; preserve lease")
 			}
 		}
@@ -397,8 +441,11 @@ func (r *Runner) Checkpoint(ticket string) (Task, error) {
 		if e = r.Client.Call(&processes, "ps", t.Box); e != nil {
 			return t, e
 		}
+		if processes == nil {
+			return t, errors.New("missing process list; preserve lease")
+		}
 		for _, p := range processes {
-			if codingProcess.MatchString(p.Command) {
+			if p.Command == "" || codingProcess.MatchString(p.Command) {
 				return t, errors.New("coding CLI still running; preserve lease")
 			}
 		}
@@ -418,6 +465,10 @@ func (r *Runner) Checkpoint(ticket string) (Task, error) {
 			if e = r.Secrets.Put(t.User, version, raw); e != nil {
 				return t, e
 			}
+			saved, e := r.Secrets.Get(t.User, version)
+			if e != nil || !bytes.Equal(saved, raw) {
+				return t, errors.New("saved login read-back failed; preserve guest auth and lease")
+			}
 			if e = r.State.CheckpointVersion(&t, version); e != nil {
 				return t, e
 			}
@@ -430,6 +481,10 @@ func (r *Runner) Checkpoint(ticket string) (Task, error) {
 	}
 	if t.Phase == "auth-saved" {
 		if t.Provider == "codex" {
+			// Recovery may run after access to the OS store changed.
+			if _, e = r.Secrets.Get(t.User, t.Version); e != nil {
+				return t, errors.New("saved login unavailable; preserve guest auth and lease")
+			}
 			if _, e = r.Client.Shell(t.Box, "rm -f /data/home/.codex/auth.json"); e != nil {
 				return t, e
 			}
@@ -439,8 +494,13 @@ func (r *Runner) Checkpoint(ticket string) (Task, error) {
 			return t, e
 		}
 	}
-	if e = r.Client.Call(nil, "suspend", t.Box); e != nil {
-		return t, e
+	if b.State != "suspended" {
+		if b.State != "running" {
+			return t, errors.New("VM not ready to finish checkpoint; preserve lease")
+		}
+		if e = r.Client.Call(nil, "suspend", t.Box); e != nil {
+			return t, e
+		}
 	}
 	return t, r.State.Release(&t)
 }

@@ -171,8 +171,9 @@ func validateAuth(raw []byte) ([]byte, error) {
 	var v struct {
 		Mode   string         `json:"auth_mode"`
 		Tokens map[string]any `json:"tokens"`
+		APIKey any            `json:"OPENAI_API_KEY"`
 	}
-	if json.Unmarshal(raw, &v) != nil || v.Mode != "chatgpt" {
+	if json.Unmarshal(raw, &v) != nil || v.Mode != "chatgpt" || (v.APIKey != nil && v.APIKey != "") {
 		return nil, errors.New("expected ChatGPT-managed Codex auth")
 	}
 	for _, k := range []string{"access_token", "refresh_token", "id_token"} {

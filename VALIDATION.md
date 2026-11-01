@@ -16,6 +16,25 @@ to migrated credentials can require a native Keychain authorization for the new
 executable. At migration time native Keychain access was rejected; Go credential
 restore, agent continuation and write-back are not yet marked verified.
 
+## Release audit on 2026-11-01
+
+The v0.1.0 candidate adds credential read-back verification before guest deletion,
+rejection of incomplete/unknown work-state responses, authoritative activity
+checks after waking an idle-paused VM, recovery after create auto-suspension,
+Node-based Claude process detection and task text over stdin. Auth bundles with
+an API-key override are rejected. Native auth paths are checked before a turn.
+
+Fault-injection and CLI transport tests cover these changes. Local race tests,
+vet, macOS build and a synthetic native Keychain write/read/delete passed.
+The synthetic test reads no real login and does not establish model execution.
+Known jose2go issues were fixed by upgrading to 1.7.0; x/sys was also upgraded.
+The candidate requires Go 1.26.10+ so scans and builds use a patched toolchain.
+CI additionally exercises an isolated Linux Secret Service with synthetic data.
+Consult the exact candidate's CI run for its current result.
+
+Publication remains gated by docs/release.md. A draft release is not a public
+version, and the outstanding real-login/bot/PR proof below remains outstanding.
+
 ## Earlier prototype observations
 
 The earlier controller performed official remote Codex device login, a model

@@ -11,10 +11,13 @@ import (
 	"strings"
 )
 
+const Version = "0.1.0"
+
 func help() {
 	fmt.Println(`ib-ticket [--config PATH] [--state PATH] COMMAND
 
 Commands:
+  version                         Print controller version
   bootstrap                       Create dedicated official Codex login VM
   create --ticket ID              Create one task VM (configurable user/org/size)
   prepare ID                      Clone configured repository and create task branch
@@ -65,6 +68,9 @@ func reorder(args []string) ([]string, error) {
 	return append(flags, pos...), nil
 }
 func execute(args []string) (any, error) {
+	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
+		return map[string]string{"version": Version}, nil
+	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		help()
 		return nil, nil

@@ -14,11 +14,19 @@ import (
 var fakeAuth = []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"fake-access","refresh_token":"fake-refresh","id_token":"fake-id"}}`)
 
 type memorySecrets struct {
-	values map[string][]byte
-	fail   bool
+	values   map[string][]byte
+	fail     bool
+	denyRead bool
+	corrupt  bool
 }
 
 func (m *memorySecrets) Get(u, v string) ([]byte, error) {
+	if m.denyRead {
+		return nil, errors.New("access denied")
+	}
+	if m.corrupt {
+		return []byte("incorrect saved data"), nil
+	}
 	raw, ok := m.values[u+"/"+v]
 	if !ok {
 		return nil, errors.New("missing")
@@ -45,6 +53,12 @@ type fakeClient struct {
 	lostCreate  bool
 	failStart   bool
 	shells      []string
+	prompts     []string
+}
+
+func (f *fakeClient) Prompt(out any, prompt string, args ...string) error {
+	f.prompts = append(f.prompts, prompt)
+	return f.Call(out, args...)
 }
 
 func (f *fakeClient) Call(out any, args ...string) error {
@@ -132,7 +146,7 @@ func setup(t *testing.T) (*Runner, *fakeClient, *memorySecrets) {
 		t.Fatal(e)
 	}
 	t.Cleanup(s.Close)
-	f := &fakeClient{boxes: map[string]Box{}, processes: []Process{}}
+	f := &fakeClient{boxes: map[string]Box{}, processes: []Process{}, convs: []Conversation{}, jobs: []map[string]string{}}
 	m := &memorySecrets{values: map[string][]byte{}}
 	return &Runner{State: s, Client: f, Secrets: m}, f, m
 }

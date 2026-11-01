@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -33,6 +35,7 @@ type StartResult struct {
 }
 type Client interface {
 	Call(any, ...string) error
+	Prompt(any, string, ...string) error
 	Shell(string, string) (string, error)
 	Credentials(string, []byte) ([]byte, error)
 }
@@ -40,6 +43,14 @@ type Client interface {
 type Instabox struct{}
 
 func (i Instabox) Call(out any, args ...string) error {
+	return i.call(out, nil, args...)
+}
+
+func (i Instabox) Prompt(out any, prompt string, args ...string) error {
+	return i.call(out, strings.NewReader(prompt), append(args, "-")...)
+}
+
+func (i Instabox) call(out any, input io.Reader, args ...string) error {
 	argv := append([]string{}, args...)
 	pos := len(argv)
 	for n, s := range argv {
@@ -54,6 +65,7 @@ func (i Instabox) Call(out any, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "instabox", argv...)
+	cmd.Stdin = input
 	raw, e := cmd.Output()
 	if ctx.Err() != nil {
 		return errors.New("Instabox outcome uncertain; reconcile before retrying")
@@ -68,13 +80,13 @@ func (i Instabox) Call(out any, args ...string) error {
 }
 func (i Instabox) Shell(box, command string) (string, error) {
 	var r struct {
-		Code   int    `json:"exitCode"`
+		Code   *int   `json:"exitCode"`
 		Stdout string `json:"stdout"`
 	}
 	if e := i.Call(&r, "exec", box, "--", "bash", "-lc", command); e != nil {
 		return "", e
 	}
-	if r.Code != 0 {
+	if r.Code == nil || *r.Code != 0 {
 		return "", errors.New("remote prerequisite failed; inspect VM privately")
 	}
 	return r.Stdout, nil

@@ -10,7 +10,7 @@ No account-specific configuration, credentials or VM snapshots are distributed.
 ## Install
 
 Requires an authenticated Instabox CLI, macOS or Linux, and a native credential
-store (macOS Keychain or Linux Secret Service). Build from source with Go 1.25+;
+store (macOS Keychain or Linux Secret Service). Build from source with Go 1.26.10+;
 macOS builds need CGO and Xcode Command Line Tools for native Keychain access.
 No Python, uv or Node runtime is required by the controller or skill.
 
@@ -20,11 +20,16 @@ cd instabox-ticket-runner
 go build -o bin/ib-ticket .
 go test ./...
 ./bin/ib-ticket --help
+./bin/ib-ticket --version
 ```
 
 The binary still delegates VM operations to the installed Instabox CLI.
 No prebuilt release or Windows support is claimed. Linux builds need a reachable,
 unlocked Secret Service; do not fall back to a plaintext store on a headless host.
+Keep the checkout at a stable trusted path. Rebuilding or moving a macOS binary
+can require fresh native Keychain approval. Never change an item's access rules
+to allow all programs. See [release gates](docs/release.md) and
+[credential boundaries](SECURITY.md).
 
 ## Private configuration
 
@@ -87,8 +92,10 @@ runs because model waiting can count as idle. Inspect tests and diffs yourself.
 Later runs retain the same conversation and its original cwd; include any
 intended directory change in the prompt. PR publishing/mapping is not automated.
 
-Checkpoint refuses running jobs/agents, saves the latest Codex bundle into the
-OS store, removes the guest auth file, pauses the VM and releases its profile.
+Checkpoint refuses running or unknown jobs/agents, saves the latest Codex bundle
+and verifies identical read-back from the OS store before removing guest auth,
+pausing the VM and releasing its profile. It resumes an idle-paused VM first
+because process listings while paused can be cached.
 Next run restores the latest bundle. File deletion is not secure disk erasure;
 do not share credential-bearing task disks or snapshots as clean images.
 
@@ -106,7 +113,9 @@ call before assigning a real ticket; skill installation is not integration proof
 SQLite stores metadata/version references/leases under
 ~/.local/state/instabox-ticket-runner (0700). Token bytes live in the OS store;
 private temporary files and Instabox's file transport move bundles. They do not
-enter command arguments, task prompts or logs. Plaintext fallback is disabled.
+enter command arguments, task prompts or logs. Task text reaches the Instabox CLI
+through stdin; native conversation/event files still contain it inside the VM.
+Plaintext fallback is disabled.
 Preserve the DB and namespace; do not manually clear a failed lease.
 
 Each Codex profile runs serially. Use one trusted controller host: --user is a
