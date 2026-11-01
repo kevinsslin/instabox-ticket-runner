@@ -17,6 +17,10 @@ func help() {
 	fmt.Println(`ib-ticket [--config PATH] [--state PATH] COMMAND
 
 Commands:
+  supervise                       Checkpoint completed host-managed turns
+  watch ID                        Wait for one turn and checkpoint it
+  linear --settings PATH          Optional Linear Agent Session webhook and worker
+  serve --password-file PATH      Read-only dashboard on 127.0.0.1:8787
   version                         Print controller version
   init-key                        Generate a private headless-store key (never overwrite)
   bootstrap                       Create dedicated official Codex login VM
@@ -24,6 +28,7 @@ Commands:
   prepare ID                      Clone configured repository and create task branch
   run ID --prompt-file PATH       Start or resume native coding agent
   status ID                       Read task and VM status
+  link-pr ID --url HTTPS_URL       Record a GitHub PR for the dashboard
   activate ID                     Resume VM and restore latest Codex auth
   checkpoint ID                   Save auth, pause VM, release profile lease
   reconcile ID                    Reconcile uncertain VM creation
@@ -106,6 +111,15 @@ func execute(args []string) (any, error) {
 		return nil, errors.New("missing command")
 	}
 	action := args[0]
+	if action == "supervise" || action == "watch" {
+		return nil, runSupervisor(root, configPath, action, args[1:])
+	}
+	if action == "linear" {
+		return nil, runLinear(root, configPath, args[1:])
+	}
+	if action == "serve" {
+		return nil, serveDashboard(root, args[1:])
+	}
 	c, e := loadConfig(expandHome(configPath), os.LookupEnv)
 	if e != nil {
 		return nil, e
@@ -126,6 +140,8 @@ func execute(args []string) (any, error) {
 	cwd := f.String("cwd", "/data/home", "")
 	model := f.String("model", "", "")
 	conv := f.String("conversation", "", "")
+	prURL := f.String("url", "", "")
+	supervision := f.String("supervision", "host", "")
 	backend := f.String("credential-backend", c.CredentialBackend, "")
 	keyFile := f.String("credential-key-file", c.CredentialKeyFile, "")
 	reordered, e := reorder(args[1:])
@@ -167,7 +183,7 @@ func execute(args []string) (any, error) {
 		}
 		return map[string]string{"status": "key-created"}, nil
 	}
-	valid := map[string]bool{"create": true, "bootstrap": true, "status": true, "prepare": true, "run": true, "activate": true, "checkpoint": true, "reconcile": true, "recover-prepare": true, "recover-turn": true}
+	valid := map[string]bool{"link-pr": true, "create": true, "bootstrap": true, "status": true, "prepare": true, "run": true, "activate": true, "checkpoint": true, "reconcile": true, "recover-prepare": true, "recover-turn": true}
 	if !valid[action] {
 		return nil, errors.New("unknown command")
 	}
@@ -189,8 +205,24 @@ func execute(args []string) (any, error) {
 	if c.CredentialBackend == "encrypted-file" {
 		secrets = &EncryptedSecrets{KeyFile: expandHome(c.CredentialKeyFile), Dir: filepath.Join(s.Root, "credentials"), Namespace: s.Namespace}
 	}
-	r := Runner{State: s, Client: Instabox{}, Secrets: secrets}
+	if *supervision != "host" && *supervision != "external" {
+		return nil, errors.New("supervision must be host or external")
+	}
+	r := Runner{State: s, Client: Instabox{}, Secrets: secrets, Supervision: *supervision}
 	switch action {
+	case "link-pr":
+		t, err := s.Task(ticket)
+		if err != nil {
+			return nil, err
+		}
+		if !validPRURL(*prURL, t.Repo) {
+			return nil, errors.New("provide a GitHub pull request URL for the prepared repository")
+		}
+		t.PR = *prURL
+		if err = s.Save(t); err != nil {
+			return nil, err
+		}
+		return viewTask(t), nil
 	case "create":
 		return r.Create(*ticketFlag, c, false)
 	case "bootstrap":
@@ -210,6 +242,9 @@ func execute(args []string) (any, error) {
 	case "recover-turn":
 		return r.RecoverTurn(ticket, *conv)
 	case "run":
+		if *supervision == "host" && !supervisorPresent(s.Root) {
+			return nil, errors.New("start ib-ticket supervise as a persistent host service before run, or explicitly use --supervision external with your own watcher")
+		}
 		if *prompt == "" {
 			return nil, errors.New("provide a private task-text file using --prompt-file")
 		}

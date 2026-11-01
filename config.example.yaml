@@ -6,6 +6,8 @@ repo: owner/repo
 base: main
 vcpus: 2
 mem_mib: 4096
+# Paid plans: 5m backup idle pause. Free: use 30m and its allowed VM size.
+auto_suspend: 5m
 # Existing Instabox Secret names only. Select GH_TOKEN for a private GitHub repo.
 secrets: []
 # secrets: [GH_TOKEN]

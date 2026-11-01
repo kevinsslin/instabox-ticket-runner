@@ -40,7 +40,23 @@ type Client interface {
 	Credentials(string, []byte) ([]byte, error)
 }
 
-type Instabox struct{}
+type Instabox struct {
+	Timeout   time.Duration
+	MaxOutput int
+}
+
+type boundedOutput struct {
+	data  []byte
+	limit int
+}
+
+func (b *boundedOutput) Write(p []byte) (int, error) {
+	if len(p) > b.limit-len(b.data) {
+		return 0, errors.New("output limit exceeded")
+	}
+	b.data = append(b.data, p...)
+	return len(p), nil
+}
 
 func (i Instabox) Call(out any, args ...string) error {
 	return i.call(out, nil, args...)
@@ -62,11 +78,22 @@ func (i Instabox) call(out any, input io.Reader, args ...string) error {
 	argv = append(argv, "")
 	copy(argv[pos+1:], argv[pos:])
 	argv[pos] = "--json"
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	timeout := i.Timeout
+	if timeout == 0 {
+		timeout = 180 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "instabox", argv...)
 	cmd.Stdin = input
-	raw, e := cmd.Output()
+	limit := i.MaxOutput
+	if limit == 0 {
+		limit = 64 << 20
+	}
+	output := &boundedOutput{limit: limit}
+	cmd.Stdout = output
+	e := cmd.Run()
+	raw := output.data
 	if ctx.Err() != nil {
 		return errors.New("Instabox outcome uncertain; reconcile before retrying")
 	}

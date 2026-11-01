@@ -10,9 +10,10 @@ import (
 )
 
 type Runner struct {
-	State   *State
-	Client  Client
-	Secrets Secrets
+	State       *State
+	Client      Client
+	Secrets     Secrets
+	Supervision string
 }
 
 func (r *Runner) owned(t Task) (Box, error) {
@@ -71,7 +72,11 @@ func (r *Runner) Create(ticket string, c Config, bootstrap bool) (Task, error) {
 	if selected == "" {
 		selected = "none"
 	}
-	args := []string{"create", "--name", t.Name, "--org", t.Org, "--no-vault", "--secrets", selected, "--vcpus", strconv.Itoa(c.VCPUs), "--mem-mib", strconv.Itoa(c.Memory), "--auto-suspend", "10m", "--max-run-minutes", "60", "--fail-fast", "--meta", "ticket=" + ticket, "--meta", "controller=" + r.State.Namespace}
+	idle := c.AutoSuspend
+	if idle == "" {
+		idle = "5m"
+	}
+	args := []string{"create", "--name", t.Name, "--org", t.Org, "--no-vault", "--secrets", selected, "--vcpus", strconv.Itoa(c.VCPUs), "--mem-mib", strconv.Itoa(c.Memory), "--auto-suspend", idle, "--max-run-minutes", "60", "--fail-fast", "--meta", "ticket=" + ticket, "--meta", "controller=" + r.State.Namespace}
 	if c.Snapshot != "" {
 		args = append(args, "--snapshot", c.Snapshot)
 	}
@@ -288,15 +293,32 @@ func (r *Runner) Run(ticket, prompt, cwd, model string) (StartResult, error) {
 	if e = r.State.Save(t); e != nil {
 		return result, e
 	}
+	modeBefore := r.Supervision
+	if modeBefore == "" {
+		modeBefore = "host"
+	}
+	if _, e = r.State.DB.Exec("INSERT INTO turns(ticket,conversation,job,mode,status) VALUES(?,?,'',?,'uncertain') ON CONFLICT(ticket) DO UPDATE SET status='uncertain',mode=excluded.mode,job='',note=''", t.Ticket, t.Conversation, modeBefore); e != nil {
+		return result, e
+	}
 	if e = r.Client.Prompt(&result, prompt, args...); e != nil {
 		return result, e
 	}
-	if result.ID == "" {
-		return result, errors.New("agent start response missing conversation; reconcile")
+	if result.ID == "" || result.Job == "" {
+		return result, errors.New("agent start response missing conversation or job; reconcile")
 	}
 	t.Conversation = result.ID
 	t.Phase = "active"
-	return result, r.State.Save(t)
+	if e = r.State.Save(t); e != nil {
+		return result, e
+	}
+	mode := r.Supervision
+	if mode == "" {
+		mode = "host"
+	}
+	if _, e = r.State.DB.Exec("INSERT INTO turns(ticket,conversation,job,mode,status) VALUES(?,?,?,?,'active') ON CONFLICT(ticket) DO UPDATE SET conversation=excluded.conversation,job=excluded.job,mode=excluded.mode,status='active',note=''", t.Ticket, result.ID, result.Job, mode); e != nil {
+		return result, e
+	}
+	return result, nil
 }
 func (r *Runner) RecoverTurn(ticket, conv string) (Task, error) {
 	t, e := r.State.Task(ticket)
@@ -315,9 +337,19 @@ func (r *Runner) RecoverTurn(ticket, conv string) (Task, error) {
 	}
 	for _, v := range vs {
 		if v.ID == conv && v.Provider == t.Provider {
+			var events struct {
+				Job string `json:"jobId"`
+			}
+			if e = r.Client.Call(&events, "agent", "events", t.Box, "-c", conv); e != nil || events.Job == "" {
+				return t, errors.New("cannot verify recovered turn job")
+			}
 			t.Conversation = conv
 			t.Phase = "active"
-			return t, r.State.Save(t)
+			if e = r.State.Save(t); e != nil {
+				return t, e
+			}
+			_, e = r.State.DB.Exec("INSERT INTO turns(ticket,conversation,job,mode,status) VALUES(?,?,?,'host','active') ON CONFLICT(ticket) DO UPDATE SET conversation=excluded.conversation,job=excluded.job,status='active',note=''", t.Ticket, conv, events.Job)
+			return t, e
 		}
 	}
 	return t, errors.New("select a verified existing conversation")
@@ -448,6 +480,9 @@ func (r *Runner) Checkpoint(ticket string) (Task, error) {
 			if p.Command == "" || codingProcess.MatchString(p.Command) {
 				return t, errors.New("coding CLI still running; preserve lease")
 			}
+		}
+		if e = r.captureObservation(t); e != nil {
+			return t, e
 		}
 		if t.Provider == "codex" {
 			v, e := r.State.Version(t.User)

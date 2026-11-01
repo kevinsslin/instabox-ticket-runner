@@ -15,3 +15,9 @@ auth.json
 .venv/
 __pycache__/
 .pytest_cache/
+
+/linear.yaml
+/linear.local.yaml
+/dashboard-password
+/linear-access-token
+/linear-webhook-secret

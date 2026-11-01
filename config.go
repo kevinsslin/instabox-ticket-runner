@@ -19,6 +19,7 @@ type Config struct {
 	Provider          string   `yaml:"provider"`
 	Repo              string   `yaml:"repo"`
 	Base              string   `yaml:"base"`
+	AutoSuspend       string   `yaml:"auto_suspend"`
 	Snapshot          string   `yaml:"snapshot"`
 	VCPUs             int      `yaml:"vcpus"`
 	Memory            int      `yaml:"mem_mib"`
@@ -39,7 +40,7 @@ func validID(s string) error {
 }
 
 func decodeConfig(r io.Reader) (Config, error) {
-	c := Config{Provider: "codex", Base: "main", VCPUs: 2, Memory: 4096}
+	c := Config{Provider: "codex", Base: "main", AutoSuspend: "5m", VCPUs: 2, Memory: 4096}
 	d := yaml.NewDecoder(r)
 	d.KnownFields(true)
 	if err := d.Decode(&c); err != nil && err != io.EOF {
@@ -53,7 +54,7 @@ func decodeConfig(r io.Reader) (Config, error) {
 }
 
 func loadConfig(path string, env func(string) (string, bool)) (Config, error) {
-	c := Config{Provider: "codex", Base: "main", VCPUs: 2, Memory: 4096}
+	c := Config{Provider: "codex", Base: "main", AutoSuspend: "5m", VCPUs: 2, Memory: 4096}
 	if path != "" {
 		f, err := os.Open(path)
 		if err != nil {
@@ -66,7 +67,7 @@ func loadConfig(path string, env func(string) (string, bool)) (Config, error) {
 		}
 		c = v
 	}
-	for k, p := range map[string]*string{"USER": &c.User, "ORG": &c.Org, "PROVIDER": &c.Provider, "REPO": &c.Repo, "BASE": &c.Base, "SNAPSHOT": &c.Snapshot, "CREDENTIAL_BACKEND": &c.CredentialBackend, "CREDENTIAL_KEY_FILE": &c.CredentialKeyFile} {
+	for k, p := range map[string]*string{"USER": &c.User, "ORG": &c.Org, "PROVIDER": &c.Provider, "REPO": &c.Repo, "BASE": &c.Base, "AUTO_SUSPEND": &c.AutoSuspend, "SNAPSHOT": &c.Snapshot, "CREDENTIAL_BACKEND": &c.CredentialBackend, "CREDENTIAL_KEY_FILE": &c.CredentialKeyFile} {
 		if v, ok := env("IB_TICKET_" + k); ok {
 			*p = v
 		}
@@ -119,6 +120,9 @@ func (c Config) Validate() error {
 	}
 	if c.Base == "" || strings.HasPrefix(c.Base, "-") || strings.ContainsAny(c.Base, "\r\n\x00") {
 		return errors.New("invalid base branch")
+	}
+	if c.AutoSuspend != "" && c.AutoSuspend != "5m" && c.AutoSuspend != "10m" && c.AutoSuspend != "15m" && c.AutoSuspend != "20m" && c.AutoSuspend != "25m" && c.AutoSuspend != "30m" {
+		return errors.New("auto_suspend must be 5m, 10m, 15m, 20m, 25m or 30m; free plans require 30m")
 	}
 	if c.VCPUs <= 0 || c.Memory <= 0 {
 		return errors.New("VM size must contain positive integers")

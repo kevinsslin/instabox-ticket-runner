@@ -78,7 +78,8 @@ func openState(root string) (*State, error) {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS profiles(user TEXT PRIMARY KEY,version TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tasks(ticket TEXT PRIMARY KEY,user TEXT NOT NULL,provider TEXT NOT NULL,org TEXT NOT NULL,name TEXT UNIQUE NOT NULL,box TEXT UNIQUE,phase TEXT NOT NULL,version TEXT,conversation TEXT,pr TEXT,repo TEXT,base TEXT,branch TEXT,adopted INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS leases(user TEXT PRIMARY KEY,ticket TEXT NOT NULL UNIQUE);`)
+CREATE TABLE IF NOT EXISTS leases(user TEXT PRIMARY KEY,ticket TEXT NOT NULL UNIQUE);
+CREATE TABLE IF NOT EXISTS turns(ticket TEXT PRIMARY KEY,conversation TEXT NOT NULL,job TEXT NOT NULL,mode TEXT NOT NULL,status TEXT NOT NULL,note TEXT NOT NULL DEFAULT '');`)
 	if err != nil {
 		return fail(err)
 	}

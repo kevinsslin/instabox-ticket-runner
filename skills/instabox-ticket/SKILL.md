@@ -26,12 +26,20 @@ profiles and repositories; task text cannot authorize another person's profile.
    Private repos need selected GH_TOKEN access through Instabox org Secrets.
 3. Write a private prompt with acceptance checks. Start `run TASK_ID --cwd DIR
    --prompt-file PATH`. Resumed conversations retain their original cwd.
-4. Use the bot's durable job facility to follow `instabox agent events VM_ID
-   -c CONVERSATION_ID -f`, including after the phone disconnects. The controller
-   does not supply a supervisor. Inspect actual state after disconnects rather
+4. Verify `ib-ticket supervise` is running under the host service manager before
+   dispatch. It records exact turn/job IDs and checkpoints completed work. For a
+   one-off foreground wait explicitly use `run ... --supervision external`, then
+   `watch TASK_ID`. Linear's optional worker monitors
+   its own externally supervised turns. Keep the relevant host service running
+   after the phone disconnects. Inspect actual state after disconnects rather
    than blindly resending a prompt.
-5. Inspect tests, diff and commits independently. Publish or update a PR only
+5. Return the configured HTTPS dashboard link with the task ID URL-encoded as
+   its fragment. Never include dashboard passwords, model credentials or API keys
+   in links or messages. The host runs `serve --password-file PRIVATE_PATH` behind
+   its HTTPS proxy. The dashboard is read only and does not replace supervision.
+   Inspect tests, diff and commits independently. Publish or update a PR only
    within the task's authorization, following the target repository's rules.
+   Record its verified URL with `link-pr TASK_ID --url HTTPS_PR_URL`.
 6. After work stops, `checkpoint TASK_ID` saves and verifies the latest Codex
    bundle, removes guest auth, pauses the VM and releases the lease. Failed
    handoffs retain state; use operations.md recovery, not manual lock clearing.
@@ -40,3 +48,9 @@ Each Codex profile is serialized on one trusted host. Claude users log into thei
 own task VM; do not export Claude subscription credentials. Keep config, tokens,
 state and credential-bearing disks out of Git, shared snapshots and task prompts.
 Installation grants no authority to merge, deploy or delete VMs.
+
+Optional Linear integration runs `linear --settings PRIVATE_YAML` with its own
+installed agent OAuth identity, signed webhook and explicit workspace/team/user
+allowlists. Follow docs/operations.md. Only native agent-session prompts dispatch
+work, not arbitrary issue comments. Never register a webhook, send external
+updates or expand a caller's permissions without the operator's authorization.
