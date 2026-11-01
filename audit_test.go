@@ -206,12 +206,16 @@ func TestNativeCredentialStoreRoundTrip(t *testing.T) {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() {
-		if e := s.ring.Remove("codex/audit/" + version); e != nil {
+		if e := s.ring.Remove(s.key("audit", version)); e != nil {
 			t.Error("cannot remove synthetic audit entry")
 		}
 	})
 	got, e := s.Get("audit", version)
 	if e != nil || !bytes.Equal(got, fakeAuth) {
 		t.Fatal("native store round-trip failed (no credential data logged)")
+	}
+	other := &OSSecrets{service: "instabox-ticket-audit/" + randomID()}
+	if _, e := other.Get("audit", version); e == nil {
+		t.Fatal("separate controller namespaces share a credential item")
 	}
 }

@@ -32,6 +32,11 @@ The candidate requires Go 1.26.10+ so scans and builds use a patched toolchain.
 CI additionally exercises an isolated Linux Secret Service with synthetic data.
 Consult the exact candidate's CI run for its current result.
 
+The first Linux integration run exposed a graphical collection-creation prompt.
+The adapter now uses the existing unlocked GNOME login collection and prefixes
+item names with the controller namespace. The native test also checks that a
+different namespace cannot read its synthetic item.
+
 Publication remains gated by docs/release.md. A draft release is not a public
 version, and the outstanding real-login/bot/PR proof below remains outstanding.
 

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/99designs/keyring"
 	"github.com/gofrs/flock"
@@ -198,18 +199,35 @@ func (o *OSSecrets) open() error {
 	if o.ring != nil {
 		return nil
 	}
-	r, e := keyring.Open(keyring.Config{ServiceName: o.service, AllowedBackends: []keyring.BackendType{keyring.KeychainBackend, keyring.SecretServiceBackend}, KeychainTrustApplication: true})
+	r, e := keyring.Open(keyring.Config{
+		ServiceName:              o.service,
+		AllowedBackends:          []keyring.BackendType{keyring.KeychainBackend, keyring.SecretServiceBackend},
+		KeychainTrustApplication: true,
+		// Use the operator's existing unlocked GNOME collection. Creating a new
+		// collection for each state namespace requires a graphical password prompt.
+		LibSecretCollectionName: "login",
+	})
 	if e != nil {
 		return errors.New("OS credential store unavailable; plaintext fallback is disabled")
 	}
 	o.ring = r
 	return nil
 }
+
+func (o *OSSecrets) key(user, version string) string {
+	key := "codex/" + user + "/" + version
+	// Secret Service scopes items to a collection, unlike Keychain's service
+	// attribute. Preserve namespace isolation within the shared login collection.
+	if runtime.GOOS == "linux" {
+		return o.service + "/" + key
+	}
+	return key
+}
 func (o *OSSecrets) Get(user, version string) ([]byte, error) {
 	if e := o.open(); e != nil {
 		return nil, e
 	}
-	v, e := o.ring.Get("codex/" + user + "/" + version)
+	v, e := o.ring.Get(o.key(user, version))
 	if e != nil {
 		return nil, errors.New("saved Codex login unavailable or OS access denied; verify native credential-store access before reseeding")
 	}
@@ -222,7 +240,7 @@ func (o *OSSecrets) Put(user, version string, value []byte) error {
 	if e := o.open(); e != nil {
 		return e
 	}
-	if e := o.ring.Set(keyring.Item{Key: "codex/" + user + "/" + version, Data: value, Label: "Instabox coding login"}); e != nil {
+	if e := o.ring.Set(keyring.Item{Key: o.key(user, version), Data: value, Label: "Instabox coding login"}); e != nil {
 		return errors.New("OS credential store write failed")
 	}
 	return nil

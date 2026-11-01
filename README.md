@@ -24,8 +24,9 @@ go test ./...
 ```
 
 The binary still delegates VM operations to the installed Instabox CLI.
-No prebuilt release or Windows support is claimed. Linux builds need a reachable,
-unlocked Secret Service; do not fall back to a plaintext store on a headless host.
+No prebuilt release or Windows support is claimed. Linux builds need a reachable
+Secret Service with an existing unlocked GNOME login collection. Item names
+include the controller namespace. Do not fall back to plaintext on a headless host.
 Keep the checkout at a stable trusted path. Rebuilding or moving a macOS binary
 can require fresh native Keychain approval. Never change an item's access rules
 to allow all programs. See [release gates](docs/release.md) and
