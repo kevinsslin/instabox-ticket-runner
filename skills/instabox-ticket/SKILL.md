@@ -1,6 +1,6 @@
 ---
 name: instabox-ticket
-description: Run or resume coding tasks on Instabox with the Go controller and private YAML. Works with any task source, including plain prompts; issue-tracker integration and PR publication are not automated.
+description: Run or resume coding tasks on Instabox with the Go controller and private YAML. Works with any task source, including plain prompts, with an optional Linear Agent Sessions bridge. PR publication remains agent-owned.
 ---
 
 # Instabox tasks
