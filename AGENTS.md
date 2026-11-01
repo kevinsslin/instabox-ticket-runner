@@ -1,18 +1,19 @@
-# Instabox ticket runner
+# Contributor instructions
 
-This repository owns a generic Go controller and operator skill. Keep account,
-workspace, repository, branch and company-specific values in private YAML or
-IB_TICKET_* environment settings. Only generic examples belong in Git.
+Keep the CLI independent of issue trackers and bot vendors. Task IDs are opaque;
+company values and account configuration belong in private YAML, never examples.
+Preserve existing state schemas and command aliases when changing public names.
 
-Preserve task state, credential versions and durable leases. Never log tokens,
-bypass locks, clone credential-bearing VM snapshots, or delete ambiguous work.
-The OS store adapter must not put credential bytes in subprocess arguments.
+Preserve credential versions, leases and uncertain-operation recovery. Never log
+credentials, bypass a lock or delete ambiguous work. Changes to credential storage
+need failure-path tests that verify the guest copy and lease survive errors.
 
-Run go test ./... and go vet ./... for code changes. The standalone example
-module is deliberately incomplete and excluded from the controller module.
-Run the skill wrapper after changes. Keep unit, live VM, coding, PR and
-long-term refresh evidence separate. Do not claim full production readiness.
+Run `go test ./...` and `go vet ./...` for Go changes. Build and check the skill
+wrapper after CLI changes. The duration example is deliberately incomplete and
+has its own module. Use local link checks for documentation-only changes.
 
-The current controller runs on one trusted macOS/Linux host. It is not a
-multi-tenant service and its process lock is not distributed. Publication work
-must not include local configuration, databases, credential files or binaries.
+README owns quickstart, current limitations and bot onboarding; docs/operations.md
+owns configuration and recovery; SECURITY.md owns the threat model. Keep audits,
+release checklists and implementation diaries in issues or release notes. Release
+only after real phone-to-bot task, checkpoint, revision and PR proof; distinguish
+that evidence from unit/CI checks. Do not publish private config, state or binaries.

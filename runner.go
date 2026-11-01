@@ -46,7 +46,7 @@ func (r *Runner) Create(ticket string, c Config, bootstrap bool) (Task, error) {
 			return t, e
 		}
 		if t.User != c.User || t.Org != c.Org || t.Provider != c.Provider {
-			return t, errors.New("ticket already belongs to another identity or provider")
+			return t, errors.New("task already belongs to another identity or provider")
 		}
 		if t.Phase == "creating" || t.Phase == "created" {
 			return t, errors.New("creation requires reconciliation")
@@ -62,7 +62,7 @@ func (r *Runner) Create(ticket string, c Config, bootstrap bool) (Task, error) {
 	}
 	t := Task{Ticket: ticket, User: c.User, Provider: c.Provider, Org: c.Org, Name: strings.ToLower(ticket) + "-" + r.State.Namespace[:8], Phase: "creating"}
 	if len(t.Name) > 63 {
-		return t, errors.New("ticket too long for VM name")
+		return t, errors.New("task ID too long for VM name")
 	}
 	if e = r.State.Save(t); e != nil {
 		return t, e
@@ -517,7 +517,7 @@ func (r *Runner) Status(ticket string) (map[string]any, error) {
 }
 func requireArg(args []string) (string, error) {
 	if len(args) != 1 {
-		return "", fmt.Errorf("expected one ticket argument")
+		return "", fmt.Errorf("expected one task ID")
 	}
 	return args[0], validID(args[0])
 }

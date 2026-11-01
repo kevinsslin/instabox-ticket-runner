@@ -20,7 +20,7 @@ Commands:
   version                         Print controller version
   init-key                        Generate a private headless-store key (never overwrite)
   bootstrap                       Create dedicated official Codex login VM
-  create --ticket ID              Create one task VM (configurable user/org/size)
+  create --task ID                Create one task VM (configurable user/org/size)
   prepare ID                      Clone configured repository and create task branch
   run ID --prompt-file PATH       Start or resume native coding agent
   status ID                       Read task and VM status
@@ -31,6 +31,7 @@ Commands:
   recover-turn ID --conversation ID
 
 Configuration: --config YAML, then IB_TICKET_* environment, then command flags.
+Task IDs work without an issue tracker. --ticket remains an alias for create --task.
 No token values belong in YAML, environment overrides or task prompts.`)
 }
 
@@ -120,6 +121,7 @@ func execute(args []string) (any, error) {
 	cpu := f.Int("vcpus", c.VCPUs, "")
 	memory := f.Int("mem-mib", c.Memory, "")
 	ticketFlag := f.String("ticket", "", "")
+	taskFlag := f.String("task", "", "")
 	prompt := f.String("prompt-file", "", "")
 	cwd := f.String("cwd", "/data/home", "")
 	model := f.String("model", "", "")
@@ -149,6 +151,12 @@ func execute(args []string) (any, error) {
 	c.CredentialKeyFile = *keyFile
 	if e = c.Validate(); e != nil {
 		return nil, e
+	}
+	if action == "create" && *taskFlag != "" {
+		if *ticketFlag != "" && *ticketFlag != *taskFlag {
+			return nil, errors.New("--task and legacy --ticket must identify the same task")
+		}
+		*ticketFlag = *taskFlag
 	}
 	if action == "init-key" {
 		if len(f.Args()) != 0 || c.CredentialBackend != "encrypted-file" {

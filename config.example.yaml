@@ -1,17 +1,19 @@
-# Copy outside the checkout. These are settings and Secret names, never values.
+# Copy outside the checkout and fill in your own settings. No credential values.
 user: your-profile
 org: your-workspace-id
 provider: codex
-repo: owner/private-repo
+repo: owner/repo
 base: main
 vcpus: 2
 mem_mib: 4096
-# Optional, only a clean tool/dependency snapshot owned by your workspace:
-# snapshot: your-clean-base
-# Select existing org Secrets explicitly for private GitHub access:
+# Existing Instabox Secret names only. Select GH_TOKEN for a private GitHub repo.
 secrets: []
 # secrets: [GH_TOKEN]
-# Default desktop store. For a headless bot host, see docs/deployment.md:
-credential_backend: native
-# credential_backend: encrypted-file
-# credential_key_file: /run/credentials/ib-ticket.service/master.key
+# Optional clean tool/dependency snapshot, without credentials or private work:
+# snapshot: your-clean-base
+
+# Headless bot host. init-key generates a new private key once; do not replace it.
+credential_backend: encrypted-file
+credential_key_file: "~/.config/instabox-ticket-runner-keys/master.key"
+# For desktop storage, set credential_backend: native and remove credential_key_file.
+# Configuration and recovery: docs/operations.md

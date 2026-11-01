@@ -450,6 +450,60 @@ func TestCommandReorderingKeepsTicketAfterFlags(t *testing.T) {
 	}
 }
 
+func TestCreateTaskFlagAndLegacyAliasWithoutTracker(t *testing.T) {
+	for _, tc := range []struct{ flag, id string }{{"--task", "fix-login"}, {"--task", "my_task_1"}, {"--ticket", "GH-42"}} {
+		t.Run(tc.flag+tc.id, func(t *testing.T) {
+			t.Setenv("IB_TICKET_CONFIG", "")
+			t.Setenv("IB_TICKET_CREDENTIAL_BACKEND", "native")
+			t.Setenv("IB_TICKET_CREDENTIAL_KEY_FILE", "")
+			fakeInstabox(t, `case "$1" in
+create)
+  task= namespace=
+  for arg do
+    case "$arg" in
+      ticket=*) task=${arg#ticket=} ;;
+      controller=*) namespace=${arg#controller=} ;;
+    esac
+  done
+  printf '{"id":"test-vm","orgId":"org-test","metadata":{"ticket":"%s","controller":"%s"}}' "$task" "$namespace"
+  ;;
+suspend) printf '{}' ;;
+*) exit 1 ;;
+esac
+`)
+			root := filepath.Join(t.TempDir(), "state")
+			args := []string{"--state", root, "create", tc.flag, tc.id, "--user", "owner", "--org", "org-test", "--provider", "claude"}
+			v, e := execute(args)
+			if e != nil || v.(Task).Ticket != tc.id {
+				t.Fatal("opaque task ID or legacy alias failed", e)
+			}
+			s, e := openState(root)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer s.Close()
+			stored, e := s.Task(tc.id)
+			if e != nil || stored.Phase != "paused" || stored.Ticket != tc.id {
+				t.Fatal("task ID was not preserved", e)
+			}
+		})
+	}
+}
+
+func TestConflictingTaskAliasesFailBeforeStateCreation(t *testing.T) {
+	t.Setenv("IB_TICKET_CONFIG", "")
+	t.Setenv("IB_TICKET_CREDENTIAL_BACKEND", "native")
+	t.Setenv("IB_TICKET_CREDENTIAL_KEY_FILE", "")
+	root := filepath.Join(t.TempDir(), "unused-state")
+	_, e := execute([]string{"--state", root, "create", "--task", "fix-login", "--ticket", "other-task"})
+	if e == nil || !strings.Contains(e.Error(), "same task") {
+		t.Fatal("conflicting IDs accepted")
+	}
+	if _, e := os.Stat(root); !os.IsNotExist(e) {
+		t.Fatal("state opened before rejecting conflicting IDs")
+	}
+}
+
 func TestSkillWrapperResolvesSymlinkedDirectory(t *testing.T) {
 	root := t.TempDir()
 	checkout := filepath.Join(root, "checkout")

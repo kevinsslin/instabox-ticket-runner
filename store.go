@@ -99,7 +99,7 @@ func (s *State) Task(ticket string) (Task, error) {
 	t := Task{}
 	err := s.DB.QueryRow(`SELECT ticket,user,provider,org,name,coalesce(box,''),phase,coalesce(version,''),coalesce(conversation,''),coalesce(pr,''),coalesce(repo,''),coalesce(base,''),coalesce(branch,''),adopted FROM tasks WHERE ticket=?`, ticket).Scan(&t.Ticket, &t.User, &t.Provider, &t.Org, &t.Name, &t.Box, &t.Phase, &t.Version, &t.Conversation, &t.PR, &t.Repo, &t.Base, &t.Branch, &t.Adopted)
 	if err == sql.ErrNoRows {
-		return t, errors.New("unknown ticket")
+		return t, errors.New("unknown task")
 	}
 	return t, err
 }
@@ -122,7 +122,7 @@ func (s *State) Acquire(user, ticket string) error {
 		return e
 	}
 	if e == nil && other != ticket {
-		return errors.New("Codex profile busy with another ticket; leave this task queued")
+		return errors.New("Codex profile busy with another task; wait for its checkpoint")
 	}
 	_, e = s.DB.Exec("INSERT OR IGNORE INTO leases VALUES(?,?)", user, ticket)
 	return e
