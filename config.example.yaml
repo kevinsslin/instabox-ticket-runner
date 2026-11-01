@@ -1,0 +1,13 @@
+# Copy outside the checkout. These are settings and Secret names, never values.
+user: your-profile
+org: your-workspace-id
+provider: codex
+repo: owner/private-repo
+base: main
+vcpus: 2
+mem_mib: 4096
+# Optional, only a clean tool/dependency snapshot owned by your workspace:
+# snapshot: your-clean-base
+# Select existing org Secrets explicitly for private GitHub access:
+secrets: []
+# secrets: [GH_TOKEN]

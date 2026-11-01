@@ -1,0 +1,15 @@
+/bin/
+/dist/
+/.state/
+/config.yaml
+/config.local.yaml
+/config.local.yml
+*.db
+*.db-*
+auth.json
+.credentials.json
+.env*
+.DS_Store
+.venv/
+__pycache__/
+.pytest_cache/
