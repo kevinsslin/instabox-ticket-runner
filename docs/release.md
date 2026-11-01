@@ -19,6 +19,11 @@ configuration, database, VM disk or snapshot belongs in release assets.
   Record actual results without private task IDs or auth data.
 - Verify actual bot invocation and one real ticket/branch/PR flow. Retain the VM
   through review and verify the update reaches the same PR.
+- Perform dispatch, progress lookup and review revision from a phone, with the
+  operator's laptop offline. A persistent host must monitor and checkpoint work.
+- Verify the controller's headless credential backend across a host restart,
+  without a desktop unlock prompt or manual token transfer through chat. Native
+  Keychain/GNOME synthetic tests alone do not satisfy this deployment gate.
 - Resolve any credential-access blocker through native user authorization. Never
   bypass OS access controls or replace the user's login to obtain a green check.
 

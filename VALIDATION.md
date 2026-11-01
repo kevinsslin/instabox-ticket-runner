@@ -55,6 +55,13 @@ trial, not part of the controller test suite.
 
 ## Still pending
 
+The primary deployment target is a phone-operated bot with a persistent controller
+host. It must continue while the operator's laptop is offline. Current macOS
+Keychain and unlocked GNOME collection checks validate desktop adapters, not a
+headless production deployment. Selection and implementation of the server
+credential backend, actual bot dispatch, monitoring and automatic checkpointing
+remain required before the mobile workflow can be claimed to work.
+
 Natural token expiry/refresh, end-to-end Go auth/coding revision proof, private
 repo access, real project checks, PR publication, actual bot discovery/invocation,
 second-user onboarding, Linux credential-store operation, cancellation, credential

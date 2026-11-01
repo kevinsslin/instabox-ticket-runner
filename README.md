@@ -7,6 +7,12 @@ and continue in the same environment. Each operator uses their own accounts.
 **Experimental.** See [validation](VALIDATION.md) for the precise proof and limits.
 No account-specific configuration, credentials or VM snapshots are distributed.
 
+The intended bot workflow starts from a phone. A persistent controller host must
+handle dispatch, monitoring and checkpointing without the operator's laptop.
+The current native credential-store adapters are desktop prototypes; headless
+account-bundle storage and the complete mobile bot workflow are not implemented.
+See [deployment boundaries](docs/deployment.md) before setting up a bot host.
+
 ## Install
 
 Requires an authenticated Instabox CLI, macOS or Linux, and a native credential
