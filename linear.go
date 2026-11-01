@@ -16,8 +16,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -72,7 +74,7 @@ type linearBridge struct {
 	http         *http.Client
 	endpoint     string
 	dispatch     func(...string) (any, error)
-	lastMonitor  time.Time
+	streams      *turnStreams
 }
 
 func privateText(path string) ([]byte, error) {
@@ -206,12 +208,13 @@ func runLinear(root, config string, args []string) error {
 	if _, e = db.Exec("UPDATE deliveries SET status='blocked',reply=? WHERE status='starting'", "Controller restarted during dispatch. Reconcile the task on the host; the prompt was not replayed."); e != nil {
 		return e
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	done := make(chan struct{})
 	go func() { defer close(done); b.work(ctx) }()
 	server := &http.Server{Addr: *listen, Handler: b, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 12 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	fmt.Fprintf(os.Stderr, "Linear webhook: http://%s/webhooks/linear (route only this path through HTTPS)\n", *listen)
+	go func() { <-ctx.Done(); server.Close() }()
 	e = server.ListenAndServe()
 	cancel()
 	<-done
@@ -418,12 +421,27 @@ func (b *linearBridge) delivery(query string) (linearDelivery, error) {
 const deliveryColumns = "id,session,task,prompt,status,reply,ack,job"
 
 func (b *linearBridge) work(ctx context.Context) {
+	b.streams = newTurnStreams(ctx)
+	defer b.streams.close()
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case result := <-b.streams.results:
+			delete(b.streams.active, result.Key)
+			if ctx.Err() != nil {
+				return
+			}
+			if result.Err != nil {
+				var d linearDelivery
+				e := b.db.QueryRow("SELECT "+deliveryColumns+" FROM deliveries WHERE id=?", result.Key).Scan(&d.ID, &d.Session, &d.Task, &d.Prompt, &d.Status, &d.Reply, &d.Ack, &d.Job)
+				if e == nil {
+					b.block(d, "Event following or completion needs attention. Reconcile the original turn on the host; no prompt was replayed.")
+				}
+			}
+			b.step()
 		case <-tick.C:
 			b.step()
 		}
@@ -445,19 +463,38 @@ func (b *linearBridge) step() {
 	case "queued":
 		b.start(d)
 	case "running":
-		if time.Since(b.lastMonitor) < 15*time.Second {
+		if b.streams == nil || b.streams.active[d.ID] {
 			return
 		}
-		b.lastMonitor = time.Now()
 		if d.Ack == 1 {
 			started := d
 			started.ID += ":started"
-			if b.activity(started, "thought", "Agent turn is running. You can send a follow-up here; it will wait for the current turn to finish.") == nil {
+			if b.activity(started, "thought", "Agent turn is running. Follow-up prompts wait for this turn to finish.") == nil {
 				b.db.Exec("UPDATE deliveries SET ack=2 WHERE id=?", d.ID)
 			}
 		}
-		b.monitor(d)
+		b.streams.start(d.ID, func(ctx context.Context) error {
+			follower, ok := b.client.(eventFollower)
+			if !ok {
+				return errors.New("native event following unavailable")
+			}
+			return awaitCompletion(ctx, func() (bool, error) { return b.monitor(d) }, func(ctx context.Context) error {
+				s, e := openObservationState(b.root)
+				if e != nil {
+					return e
+				}
+				t, e := s.Task(d.Task)
+				s.DB.Close()
+				if e != nil {
+					return e
+				}
+				return follower.Follow(ctx, t.Box, t.Conversation)
+			}, streamSleep)
+		})
 	case "finishing":
+		if b.streams != nil && b.streams.active[d.ID] {
+			return
+		}
 		b.finish(d)
 	case "blocked":
 		if b.activity(d, "error", d.Reply) == nil {
@@ -525,54 +562,51 @@ func (b *linearBridge) start(d linearDelivery) {
 	}
 	b.db.Exec("UPDATE deliveries SET status='running',job=? WHERE id=?", turn.Job, d.ID)
 }
-func (b *linearBridge) monitor(d linearDelivery) {
+func (b *linearBridge) monitor(d linearDelivery) (bool, error) {
 	s, e := openObservationState(b.root)
 	if e != nil {
-		return
+		return false, errReconcileRetry
 	}
 	defer s.DB.Close()
 	t, e := s.Task(d.Task)
 	if e != nil {
-		return
+		return false, e
 	}
 	r := Runner{State: s, Client: b.client}
 	box, e := r.owned(t)
 	if e != nil {
-		return
+		if errors.Is(e, errOwnershipMismatch) {
+			return false, e
+		}
+		return false, errReconcileRetry
 	}
 	if box.State != "running" {
-		b.block(d, "VM is no longer running. Inspect the task on the host before resuming; the prompt will not be replayed.")
-		return
+		return false, errors.New("VM is no longer running; reconcile before resuming")
+	}
+	native, e := readNativeTurn(b.client, t, d.Job)
+	if e != nil {
+		return false, e
+	}
+	if native.Status == "running" {
+		return false, nil
 	}
 	var events struct {
-		Status   string            `json:"status"`
-		Job      string            `json:"jobId"`
-		ExitCode *int              `json:"exitCode"`
-		Events   []json.RawMessage `json:"events"`
+		Events []json.RawMessage `json:"events"`
 	}
-	if e = b.client.Call(&events, "agent", "events", t.Box, "-c", t.Conversation); e != nil {
-		b.block(d, "Native events are unavailable (timeout, response limit or provider error). Inspect the task and recover monitoring on the host; the turn was not replayed.")
-		return
+	detail := "Final event details are unavailable; inspect native logs on the trusted host."
+	if b.client.Call(&events, "agent", "events", t.Box, "-c", t.Conversation) == nil {
+		detail = agentReply(events.Events)
 	}
-	if events.Job != d.Job || d.Job == "" {
-		return
-	}
-	if events.Status == "running" {
-		return
-	}
-	if !idleConversation(events.Status) || events.ExitCode == nil {
-		return
-	}
-	reply := fmt.Sprintf("Agent turn ended (exit %d). This is not a certification that tests passed.\n\n", *events.ExitCode) + agentReply(events.Events)
-	if t.PR != "" && validPRURL(t.PR, t.Repo) {
+	reply := fmt.Sprintf("Agent turn ended (exit %d). This is not a certification that tests passed.\n\n", *native.ExitCode) + detail
+	if validPRURL(t.PR, t.Repo) {
 		reply += "\n\nPR: " + t.PR
 	}
-	// Persist the response before checkpointing so restart never loses the result.
 	if _, e = b.db.Exec("UPDATE deliveries SET status='finishing',reply=? WHERE id=?", reply, d.ID); e != nil {
-		return
+		return false, errReconcileRetry
 	}
 	d.Reply = reply
 	b.finish(d)
+	return true, nil
 }
 func agentReply(events []json.RawMessage) string {
 	reply := "No final text was captured. Inspect the task monitor for native events and command results."

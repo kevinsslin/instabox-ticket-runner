@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
@@ -208,10 +209,18 @@ func TestLinearRunsFollowupInSameTaskAndWaitsForExactJob(t *testing.T) {
 type linearEventClient struct {
 	*observationClient
 	job, status string
+	eventsFail  bool
 }
 
 func (c *linearEventClient) Call(out any, args ...string) error {
+	if args[0] == "agent" && args[1] == "ls" {
+		raw, _ := json.Marshal(map[string]any{"conversations": []any{map[string]any{"conversationId": "conv-one", "provider": "codex", "jobId": c.job, "status": c.status, "exitCode": 0}}})
+		return json.Unmarshal(raw, out)
+	}
 	if args[0] == "agent" && args[1] == "events" {
+		if c.eventsFail {
+			return errors.New("transcript output limit")
+		}
 		raw, _ := json.Marshal(map[string]any{"jobId": c.job, "status": c.status, "exitCode": 0, "events": []any{map[string]any{"type": "item.completed", "item": map[string]string{"type": "agent_message", "text": "new final answer"}}}})
 		return json.Unmarshal(raw, out)
 	}
@@ -277,7 +286,17 @@ func TestLinearAPIFailureDoesNotPreventCheckpoint(t *testing.T) {
 	defer server.Close()
 	b.endpoint = server.URL
 	b.http = server.Client()
+	b.streams = newTurnStreams(context.Background())
+	defer b.streams.close()
 	b.step()
+	select {
+	case result := <-b.streams.results:
+		if result.Err != nil {
+			t.Fatal(result.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("completion did not arrive")
+	}
 	if strings.Join(*calls, ",") != "checkpoint" {
 		t.Fatal("Linear outage prevented automatic checkpoint", *calls)
 	}
@@ -324,5 +343,22 @@ func TestLinearActivityTimeoutChecksStableIDBeforeRetry(t *testing.T) {
 	}
 	if sentID == "" {
 		t.Fatal("missing activity")
+	}
+}
+
+func (c *linearEventClient) Follow(ctx context.Context, box, conversation string) error { return nil }
+
+func TestLinearTranscriptFailureDoesNotPreventConfirmedCheckpoint(t *testing.T) {
+	b, _, c, calls := testLinear(t)
+	enqueueLinear(t, b, "first")
+	b.db.Exec("UPDATE deliveries SET status='running',job='job-one'")
+	b.client = &linearEventClient{observationClient: c, job: "job-one", status: "idle", eventsFail: true}
+	done, err := b.monitor(readDelivery(t, b, "first"))
+	if err != nil || !done || strings.Join(*calls, ",") != "checkpoint" {
+		t.Fatal(done, err, *calls)
+	}
+	d := readDelivery(t, b, "first")
+	if d.Status != "done" || !strings.Contains(d.Reply, "details are unavailable") {
+		t.Fatal(d)
 	}
 }

@@ -24,6 +24,8 @@ type Conversation struct {
 	ID       string `json:"conversationId"`
 	Provider string `json:"provider"`
 	Status   string `json:"status"`
+	Job      string `json:"jobId"`
+	ExitCode *int   `json:"exitCode"`
 }
 type Process struct {
 	Command string `json:"command"`
@@ -160,4 +162,25 @@ func (i Instabox) Credentials(box string, value []byte) ([]byte, error) {
 	}
 	_, e = i.Shell(box, "chmod 600 /data/home/.codex/auth.json; printf 'cli_auth_credentials_store = \"file\"\\n' > /data/home/.codex/config.toml")
 	return nil, e
+}
+
+// Follow drains native JSONL without buffering a transcript or applying the
+// short request timeout. EOF is only a wake-up signal, never completion proof.
+type eventFollower interface {
+	Follow(context.Context, string, string) error
+}
+
+func (i Instabox) Follow(ctx context.Context, box, conversation string) error {
+	cmd := exec.CommandContext(ctx, "instabox", "agent", "events", box, "-c", conversation, "-f")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.WaitDelay = 2 * time.Second
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil {
+		return errors.New("native event follow ended; reconcile task status")
+	}
+	return nil
 }

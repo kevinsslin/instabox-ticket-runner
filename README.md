@@ -100,13 +100,17 @@ host's existing service manager on other systems. Check service startup before
 sending tasks. To survive user logout, the host must support persistent user
 services (systemd linger, configured by its administrator).
 
-Completion is checked every 15 seconds, followed by live safety checks, observation
-capture and credential storage. There is no fixed stop-time guarantee during
-provider/storage failures. New VMs use a 5-minute idle backup on paid plans; free
+Completion uses a native `agent events -f` follower per running turn. Startup and
+stream closure trigger small status reads, with a five-minute safety reconciliation
+for stalled connections. Verified completion triggers live safety checks,
+observation capture and credential storage. There is no fixed stop-time guarantee
+during provider/storage failures. New VMs use a 5-minute idle backup on paid plans; free
 plans require `auto_suspend: 30m`. The existing 60-minute maximum runtime remains.
 Idle/max-runtime pause does not save credentials or release the profile lease.
-The host supervisor fails closed and marks attention when completion or storage
-is uncertain. Never automatically retry a lost agent start.
+The controller scans local SQLite for new host-managed turns every 5 seconds;
+it does not repeatedly download remote events while a follower is connected.
+Disconnected followers use bounded backoff and jitter. The host supervisor fails
+closed and marks attention when completion or storage is uncertain. Never automatically retry a lost agent start.
 
 ## Monitor from your phone
 

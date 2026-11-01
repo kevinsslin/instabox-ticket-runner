@@ -16,6 +16,8 @@ type Runner struct {
 	Supervision string
 }
 
+var errOwnershipMismatch = errors.New("VM ownership or credential isolation mismatch")
+
 func (r *Runner) owned(t Task) (Box, error) {
 	b := Box{}
 	if e := r.Client.Call(&b, "get", t.Box); e != nil {
@@ -23,7 +25,7 @@ func (r *Runner) owned(t Task) (Box, error) {
 	}
 	owned := b.Metadata["controller"] == r.State.Namespace || (t.Adopted == 1 && b.Metadata["purpose"] == "official-auth-probe")
 	if b.ID != t.Box || b.Org != t.Org || b.Metadata["ticket"] != t.Ticket || !owned || b.Vault {
-		return b, errors.New("VM ownership or credential isolation mismatch")
+		return b, errOwnershipMismatch
 	}
 	return b, nil
 }

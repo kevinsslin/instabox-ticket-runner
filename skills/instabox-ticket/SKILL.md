@@ -30,7 +30,9 @@ profiles and repositories; task text cannot authorize another person's profile.
    dispatch. It records exact turn/job IDs and checkpoints completed work. For a
    one-off foreground wait explicitly use `run ... --supervision external`, then
    `watch TASK_ID`. Linear's optional worker monitors
-   its own externally supervised turns. Keep the relevant host service running
+   its own externally supervised turns. Both follow native event streams and
+   reconcile exact job state after disconnects; they never replay a prompt as
+   reconnection recovery. Keep the relevant host service running
    after the phone disconnects. Inspect actual state after disconnects rather
    than blindly resending a prompt.
 5. Return the configured HTTPS dashboard link with the task ID URL-encoded as

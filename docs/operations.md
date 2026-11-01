@@ -100,8 +100,15 @@ Run `ib-ticket supervise` as a persistent service on the controller host to
 checkpoint completed host-managed turns automatically. `watch TASK_ID` waits for
 one task in the foreground instead, after `run ... --supervision external`.
 Default `run` refuses to start without a live supervisor process lock, so missing
-service setup does not silently leave an unmanaged VM running. The supervisor checks every 15 seconds and
-rechecks all conversations, jobs and processes through checkpoint before stopping.
+service setup does not silently leave an unmanaged VM running. The supervisor
+attaches a native `agent events -f` follower to each recorded job (up to four
+concurrent followers). It reads small conversation metadata at startup and when
+a follower exits, then rechecks all conversations, jobs and processes through
+checkpoint before stopping. EOF or a non-zero follow exit alone never proves
+completion: a failed agent turn can also produce a non-zero follow exit.
+Completed failed/interrupted turns can be checkpointed safely after live checks.
+The native transcript is drained without accumulating it in the follow process;
+final bounded observations remain a separate capture operation.
 It never assumes successful agent startup means completed work. Keep the service
 running independently of your phone or bot chat connection. There is no scheduler
 or automatic PR publisher. The optional Linear worker supervises its own turns
@@ -116,6 +123,29 @@ not checkpoint: guest credentials and profile leases remain until saved safely.
 If a VM pauses before completion, inspect and activate the same task, then run
 `watch TASK_ID` to explicitly retry monitoring. Uncertain starts require
 `recover-turn` first, which records the verified native job without replaying a prompt.
+
+`supervise --interval 5s` controls only local SQLite task discovery (default 5s,
+accepted 5s to 1m), not repeated native status/event requests. The Linear bridge
+also checks its local inbox for new/retry work, while its running turns use the
+same event-following and reconciliation logic. The browser still polls its
+read-only dashboard while visible; this does not drive checkpoint completion.
+
+On a connection failure, reconcile native state and reconnect with exponential
+backoff plus jitter (about 1, 2, 4, 8 and 16 seconds, six consecutive attempts).
+A connection lasting 30 seconds resets the consecutive-failure budget. There is
+no short request timeout on the long-lived follow process. A five-minute safety
+reconciliation reads small native metadata while keeping a healthy follower
+attached, covering half-open or stalled streams without repeatedly replaying logs.
+Disconnects never start a new agent turn or force-resume a paused VM. Controller shutdown cancels
+local followers and leaves native running turns intact. Durable SQLite records
+allow reattachment after service restart; an already completed job can be
+checkpointed without following or replaying it. Do not rely on an in-memory
+stream notification as the source of truth.
+
+`agent events -f` is the CLI's documented follow interface; the controller does
+not claim that the CLI's internal transport is native server push. Its upstream
+implementation may poll. This change removes the controller's repeated full-log
+completion polling and uses one follow process per attached turn.
 
 The supervisor marks failed checkpoints as attention and preserves work/leases.
 It does not retry these forever or force-pause a possibly active agent. Fix the

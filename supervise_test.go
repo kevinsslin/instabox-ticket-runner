@@ -19,7 +19,7 @@ func TestSupervisorWaitsForExactTurnAndCheckpointsOnCompletion(t *testing.T) {
 		t.Fatal(done, e, n)
 	}
 	watcher.client = &linearEventClient{observationClient: c, job: "old-job", status: "idle"}
-	if done, e := watcher.inspect(turn); done || e != nil || n != 0 {
+	if done, e := watcher.inspect(turn); done || !errors.Is(e, errReconcileRetry) || n != 0 {
 		t.Fatal("stale job completed task", done, e, n)
 	}
 	watcher.client = &linearEventClient{observationClient: c, job: "new-job", status: "idle"}
@@ -52,7 +52,7 @@ func TestSupervisorCheckpointFailureDoesNotReportSuccess(t *testing.T) {
 		t.Fatal(done, e)
 	}
 	watcher.checkpoint = func(id string) error { return errors.New("controller busy") }
-	if done, e := watcher.inspect(supervisedTurn{Task: "TASK-1", Conversation: "conv-one", Job: "job"}); done || e != nil {
+	if done, e := watcher.inspect(supervisedTurn{Task: "TASK-1", Conversation: "conv-one", Job: "job"}); done || !errors.Is(e, errReconcileRetry) {
 		t.Fatal("transient contention must retry", done, e)
 	}
 }
