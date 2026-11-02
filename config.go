@@ -14,6 +14,9 @@ import (
 )
 
 type Config struct {
+	Backend           string   `yaml:"backend"`
+	GuestBinary       string   `yaml:"guest_binary"`
+	T3PublicURL       string   `yaml:"t3_public_url"`
 	User              string   `yaml:"user"`
 	Org               string   `yaml:"org"`
 	Provider          string   `yaml:"provider"`
@@ -67,7 +70,7 @@ func loadConfig(path string, env func(string) (string, bool)) (Config, error) {
 		}
 		c = v
 	}
-	for k, p := range map[string]*string{"USER": &c.User, "ORG": &c.Org, "PROVIDER": &c.Provider, "REPO": &c.Repo, "BASE": &c.Base, "AUTO_SUSPEND": &c.AutoSuspend, "SNAPSHOT": &c.Snapshot, "CREDENTIAL_BACKEND": &c.CredentialBackend, "CREDENTIAL_KEY_FILE": &c.CredentialKeyFile} {
+	for k, p := range map[string]*string{"BACKEND": &c.Backend, "GUEST_BINARY": &c.GuestBinary, "T3_PUBLIC_URL": &c.T3PublicURL, "USER": &c.User, "ORG": &c.Org, "PROVIDER": &c.Provider, "REPO": &c.Repo, "BASE": &c.Base, "AUTO_SUSPEND": &c.AutoSuspend, "SNAPSHOT": &c.Snapshot, "CREDENTIAL_BACKEND": &c.CredentialBackend, "CREDENTIAL_KEY_FILE": &c.CredentialKeyFile} {
 		if v, ok := env("IB_TICKET_" + k); ok {
 			*p = v
 		}
@@ -93,6 +96,15 @@ func loadConfig(path string, env func(string) (string, bool)) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if c.Backend != "" && c.Backend != "native" && c.Backend != "t3" {
+		return errors.New("backend must be native or t3")
+	}
+	if c.Backend == "t3" && c.Provider != "codex" {
+		return errors.New("T3 adapter currently supports Codex only; native Claude remains available")
+	}
+	if c.T3PublicURL != "" && !validT3Origin(c.T3PublicURL) {
+		return errors.New("t3_public_url must be an HTTPS origin without a path, credentials or query")
+	}
 	switch c.CredentialBackend {
 	case "", "native":
 		if c.CredentialKeyFile != "" {

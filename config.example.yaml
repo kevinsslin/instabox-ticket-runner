@@ -2,6 +2,13 @@
 user: your-profile
 org: your-workspace-id
 provider: codex
+# Interactive T3 UI. Use backend: native for the original runner / native Claude.
+backend: t3
+# Unique private HTTPS origin for this task UI service. Set before dispatch.
+# t3_public_url: https://your-bot.your-tailnet.ts.net:8443
+# On Linux amd64 the installed controller is also the guest helper. On a Mac:
+# GOOS=linux GOARCH=amd64 go build -o bin/ib-ticket-linux .
+# guest_binary: /absolute/path/to/bin/ib-ticket-linux
 repo: owner/repo
 base: main
 vcpus: 2

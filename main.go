@@ -21,12 +21,14 @@ Commands:
   watch ID                        Wait for one turn and checkpoint it
   linear --settings PATH          Optional Linear Agent Session webhook and worker
   serve --password-file PATH      Read-only dashboard on 127.0.0.1:8787
+  ui ID --password-file PATH      T3 UI gateway on 127.0.0.1:8788 (private HTTPS)
+  pair ID --output-file PATH      Save a short-lived T3 pairing link privately
   version                         Print controller version
   init-key                        Generate a private headless-store key (never overwrite)
   bootstrap                       Create dedicated official Codex login VM
   create --task ID                Create one task VM (configurable user/org/size)
   prepare ID                      Clone configured repository and create task branch
-  run ID --prompt-file PATH       Start or resume native coding agent
+  run ID --prompt-file PATH       Start or resume configured coding agent
   status ID                       Read task and VM status
   link-pr ID --url HTTPS_URL       Record a GitHub PR for the dashboard
   activate ID                     Resume VM and restore latest Codex auth
@@ -75,6 +77,9 @@ func reorder(args []string) ([]string, error) {
 	return append(flags, pos...), nil
 }
 func execute(args []string) (any, error) {
+	if len(args) > 0 && args[0] == "t3-guest" {
+		return runT3Guest(args[1:])
+	}
 	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
 		return map[string]string{"version": Version}, nil
 	}
@@ -120,6 +125,9 @@ func execute(args []string) (any, error) {
 	if action == "serve" {
 		return nil, serveDashboard(root, args[1:])
 	}
+	if action == "ui" {
+		return nil, serveT3UI(root, configPath, args[1:])
+	}
 	c, e := loadConfig(expandHome(configPath), os.LookupEnv)
 	if e != nil {
 		return nil, e
@@ -129,6 +137,8 @@ func execute(args []string) (any, error) {
 	user := f.String("user", c.User, "")
 	org := f.String("org", c.Org, "")
 	provider := f.String("provider", c.Provider, "")
+	engine := f.String("backend", c.Backend, "")
+	outputFile := f.String("output-file", "", "")
 	repo := f.String("repo", c.Repo, "")
 	base := f.String("base", c.Base, "")
 	snapshot := f.String("snapshot", c.Snapshot, "")
@@ -158,6 +168,7 @@ func execute(args []string) (any, error) {
 	c.User = *user
 	c.Org = *org
 	c.Provider = *provider
+	c.Backend = *engine
 	c.Repo = *repo
 	c.Base = *base
 	c.Snapshot = *snapshot
@@ -183,7 +194,7 @@ func execute(args []string) (any, error) {
 		}
 		return map[string]string{"status": "key-created"}, nil
 	}
-	valid := map[string]bool{"link-pr": true, "create": true, "bootstrap": true, "status": true, "prepare": true, "run": true, "activate": true, "checkpoint": true, "reconcile": true, "recover-prepare": true, "recover-turn": true}
+	valid := map[string]bool{"pair": true, "link-pr": true, "create": true, "bootstrap": true, "status": true, "prepare": true, "run": true, "activate": true, "checkpoint": true, "reconcile": true, "recover-prepare": true, "recover-turn": true}
 	if !valid[action] {
 		return nil, errors.New("unknown command")
 	}
@@ -208,8 +219,10 @@ func execute(args []string) (any, error) {
 	if *supervision != "host" && *supervision != "external" {
 		return nil, errors.New("supervision must be host or external")
 	}
-	r := Runner{State: s, Client: Instabox{}, Secrets: secrets, Supervision: *supervision}
+	r := Runner{State: s, Client: Instabox{}, Secrets: secrets, Supervision: *supervision, Config: c}
 	switch action {
+	case "pair":
+		return t3Pair(&r, ticket, *outputFile)
 	case "link-pr":
 		t, err := s.Task(ticket)
 		if err != nil {

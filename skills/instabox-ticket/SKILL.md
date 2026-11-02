@@ -23,23 +23,28 @@ A task ID is an opaque name, not a Linear or GitHub requirement. Derive it from
 the request or use an agreed manual name. Bind the actual caller to allowed
 profiles and repositories; task text cannot authorize another person's profile.
 
+For new interactive Codex tasks, select `backend: t3` and follow the T3 section
+below. Return its original T3 UI link for prompting and supervision. The native
+read-only dashboard is optional for existing native tasks.
+
 1. Inspect `status TASK_ID`. Distinguish an unknown task from provider or auth
    failures before creating anything. Resume an existing task for revisions.
 2. For a new task use `create --task TASK_ID`, then `prepare TASK_ID`. Bootstrap
    a dedicated official Codex login if needed; the owner completes authorization.
    Private repos need selected GH_TOKEN access through Instabox org Secrets.
 3. Write a private prompt with acceptance checks. Start `run TASK_ID --cwd DIR
-   --prompt-file PATH`. Resumed conversations retain their original cwd.
+   --prompt-file PATH` (add `--model` on the first T3 run). Resumed conversations
+   retain their original cwd.
 4. Verify `ib-ticket supervise` is running under the host service manager before
    dispatch. It records exact turn/job IDs and checkpoints completed work. For a
    one-off foreground wait explicitly use `run ... --supervision external`, then
    `watch TASK_ID`. Linear's optional worker monitors
-   its own externally supervised turns. Both follow native event streams and
+   its own externally supervised turns. Native tasks follow native event streams and
    reconcile exact job state after disconnects; they never replay a prompt as
    reconnection recovery. Keep the relevant host service running
    after the phone disconnects. Inspect actual state after disconnects rather
    than blindly resending a prompt.
-5. Return the configured HTTPS dashboard link with the task ID URL-encoded as
+5. For native tasks, return the configured HTTPS dashboard link with the task ID URL-encoded as
    its fragment. Never include dashboard passwords, model credentials or API keys
    in links or messages. The host runs `serve --password-file PRIVATE_PATH` behind
    its HTTPS proxy. The dashboard is read only and does not replace supervision.
@@ -56,11 +61,23 @@ state and credential-bearing disks out of Git, shared snapshots and task prompts
 Installing the runner does not authorize merging PRs, deploying application
 changes or deleting existing VMs.
 
-T3 Code is a separate integration trial, not a supported dispatch backend in
-this binary. Its CLI can create/message threads, but native `run`, `watch`,
-`supervise` and `checkpoint` do not manage T3 sessions. Read the T3 boundaries in
-docs/operations.md before a trial; do not mix session owners or bypass the native
-process checks to make checkpoint accept a persistent T3 provider.
+For new interactive Codex tasks, use private `backend: t3` configuration. Follow
+operations.md's T3 setup, including a unique task HTTPS origin, task UI service
+and pinned matching Linux guard. The first `run` needs `--model`. Return the
+non-secret `url` from `run`; on a new browser also return the same origin's
+`/_ib/connect` page. The human pairs directly there, never via a token in chat.
+The original T3 UI owns conversation, prompts, tools, diffs and approvals. After
+pause, reload the link and explicitly resume. Native iOS/Android app access is
+not verified. Each task gateway requires a separate origin/config/listener.
+
+For T3 tasks, `watch`/`supervise` use durable SQLite filesystem notifications and
+small state reconciliation, not CLI wait polling. The Linux guest guard freezes
+input before verifying the VM is idle, then stops the idle group before normal
+credential checkpoint. Do not bypass its process/schema checks or independently
+upgrade T3. Unknown work and failed credential handoffs retain the lease. Lost
+launch replies use the original guest nonce receipt via `recover-turn`; inspect
+and explicitly select the original conversation if the receipt is unavailable.
+Never redispatch as connection recovery. Keep existing native tasks unchanged.
 
 Optional Linear integration runs `linear --settings PRIVATE_YAML` with its own
 installed agent OAuth identity, signed webhook and explicit workspace/team/user

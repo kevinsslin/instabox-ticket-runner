@@ -32,8 +32,9 @@ checkpoint flow. The owner completes official sign-in. Do not request token/key
 values in chat or copy another host's live login cache. Inspect existing org
 Secret names for repository access before requesting new provisioning.
 
-Install and start the supervisor from README, and the optional dashboard service
-below. Check both service status and private logs. On hosts without systemd user
+Install the supervisor and, for new T3 tasks, the task-specific UI service in
+[T3 Code](#t3-code). The old read-only dashboard is optional for native tasks.
+Check both service status and private logs. On hosts without systemd user
 services, use the host's existing persistent process manager with the same
 commands, environment and private paths. A process tied to the bot's current
 shell is insufficient. Verify persistence across logout/restart; systemd user
@@ -48,6 +49,9 @@ view from a real phone with their laptop offline. Report these results separatel
 from build/service startup. Create a PR only when authorized by that task.
 
 ## Host services and Tailscale
+
+For interactive Codex tasks, use [T3 Code](#t3-code) below. The commands in this
+section install the optional read-only dashboard for native tasks.
 
 After configuring the private dashboard password using README's non-overwriting
 step, install its service beside the supervisor:
@@ -81,38 +85,95 @@ Instabox. Serve is private to the tailnet; Funnel is public and is not needed
 for this setup. Keep the bot host and its services running independently of the
 phone connection. An existing authenticated HTTPS reverse proxy is also suitable.
 
-## T3 trial boundaries
+## T3 Code
 
-The proposed division is: the controller owns VM/auth lifecycle; T3 owns the
-agent thread; the bot and human target that same thread. This adapter is not
-implemented. Production dispatch continues to use the native backend.
+Select `backend: t3` for new Codex tasks, with a unique private HTTPS origin in
+`t3_public_url`. Keep existing native tasks on their original backend. This is a
+single-owner controller, not a shared multi-tenant hosting service. Each task UI
+uses its own origin, port and private config; do not reuse an origin for another
+VM while saved links/browser sessions still exist. A reverse proxy with separate
+hostnames is an alternative when managing more task slots.
 
-For a separately authorized trial, use an isolated VM/repository and independent
-official login. Inspect the account's available template and size, disable Vault
-and unrelated Secrets, and set plan-supported idle and runtime limits. Keep
-credentials out of shared snapshots. Pin the T3 version and check both CLI and
-running server versions: updating a CLI does not necessarily replace an Instabox
-template's existing service launcher. Use T3's documented authenticated pairing
-and a private tunnel/network for access. CLI/browser pairing credentials are
-separate from model login; keep both out of logs and ordinary chat.
+The controller creates a T3-template VM (paid plan), pins T3 0.1.6, installs its
+Linux guest guard, disables that VM's template T3 service, and starts the dedicated
+`ib-ticket-t3.service`. T3 binds only to guest loopback. Auth bootstrap still uses
+an independent native login VM. Task snapshots must be clean of credentials.
 
-T3 can launch through `t3 thread start` and continue through `t3 thread send`.
-Use the installed version's help and explicit provider/model when no project
-default exists. Persist returned thread/run IDs before any retry; a lost response
-does not authorize starting another thread. The tested 0.1.6 CLI's `--wait` uses
-bounded blocking wait slices. Its exit alone is not proof of safe VM suspension.
+On Linux amd64, the controller executable is also the guest guard. For a Mac
+controller, cross-build with `GOOS=linux GOARCH=amd64 go build -ldflags='-s -w'
+-o bin/ib-ticket-linux .` and set `guest_binary` to its absolute path. Do not use
+an independently updated helper. T3 task guests require systemd and cgroup v2
+with `freeze` and `cgroup.kill`; missing support fails closed.
 
-Before automating checkpoint, an adapter must account for active/queued runs,
-pending approvals/questions, finalization, and a human sending another prompt
-while completion is being processed. It must quiesce admissions and provider
-processes, retain uncertain work, and recover the exact thread after restart.
-An idle status read followed by killing T3 has a race with new user input.
-Do not weaken native process/credential checks to bridge that gap.
+Create/prepare the task and start the normal supervisor before `run`. The first
+T3 run requires `--model`; subsequent bot prompts and all browser prompts use the
+same persisted T3 thread. Human-created extra threads are included in VM-wide
+shutdown checks. Enabled T3 schedules, pending questions/approvals, queued runs,
+unfinished effects and unknown background processes prevent checkpoint.
 
-Keep trial results distinct: a desktop browser at phone width is not real-phone
-acceptance; a manual encrypted-save/resume test is not integration with
-`ib-ticket checkpoint`. Until the adapter is implemented and verified, manage
-trial VM shutdown explicitly and use idle/runtime limits only as a cost backup.
+For a persistent task UI, provision the password using README, then install:
+
+```sh
+cp deploy/ib-ticket-t3-ui@.service "$HOME/.config/systemd/user/"
+systemctl --user daemon-reload
+systemctl --user enable --now ib-ticket-t3-ui@fix-login
+systemctl --user status ib-ticket-t3-ui@fix-login
+# Inspect tailscale serve status first, then choose an unused HTTPS port:
+tailscale serve --https=8443 --bg http://127.0.0.1:8788
+```
+
+The template uses the standard private config, port 8788 and the existing
+`dashboard-password` file. For additional task services, use service overrides
+with different private configs, listeners and HTTPS origins. Do not replace an
+existing Serve mapping. Keep Funnel off. The phone and host join the same tailnet;
+task VMs need no Tailscale login or public port.
+
+The Go gateway passes the original T3 web app, HTTP and WebSocket traffic over
+private SSH streams. It requires `operator` Basic authentication on HTTPS, plus
+T3's own device session. On a new phone browser, open `/_ib/connect` and authorize
+it there. A five-minute, one-time pairing credential travels only to T3 in that
+browser, never in the bot's task link or an issue. The CLI alternative is
+`pair TASK --output-file /PRIVATE/pair.json`; open that file privately and remove
+it after use. Native T3 mobile-app pairing through the gateway is unverified.
+
+After completion, an open T3 tab can show reconnecting. Reload to display the
+small resume page, then explicitly press **Resume in T3 Code**. The supervisor arms the next run and
+waits for new input; it does not immediately stop the already-completed thread. Background
+requests/reconnects do not wake a paused VM. An explicitly approved resume
+restores the same profile and starts T3 against its persistent database.
+
+The lifecycle follower is a guest Go process watching SQLite/WAL changes with
+Linux filesystem notifications, debounced at 250ms. It reads small durable state,
+not transcripts. Notifications are hints; metadata checks at attach/reconnect
+and the five-minute safety reconciliation are authoritative. This is not an
+upstream T3 event-subscription API or CLI `--wait` loop. The task gateway gate
+prevents a stale browser request from opening SSH after checkpoint pauses a VM.
+
+At completion, the guard freezes the service's entire cgroup before its last
+read-only database transaction. It refuses queued/running/unknown states,
+unanswered requests, incomplete effects, unapplied events, schedules and unknown
+processes. If busy, it thaws the group. If idle, it uses `cgroup.kill` while
+frozen, then clears the freezer state and stops the unit so it can restart later.
+Buffered input cannot race with the kill. Acknowledged input must
+already be durable; an interrupted, unacknowledged submission requires inspecting
+the thread before retrying. This is a controlled process stop using T3's crash
+recovery, not a graceful T3 shutdown API. T3 logs/state remain private; service
+console output is suppressed because T3 prints a startup pairing credential.
+The existing live process/job checks and encrypted credential handoff follow.
+
+The guard reads the pinned version's internal schema and known idle process
+names. Unexpected states or integrations preserve the VM/login/lease and may need
+operator recovery. Never bypass a rejected guard or auto-update T3. If a save
+fails after T3 stops, retry `checkpoint TASK` after fixing storage; do not clear
+its lease. If a launch response is lost, use `recover-turn TASK`, which reads the
+original private nonce receipt. If that receipt is missing, inspect T3 and select
+the original verified `--conversation`; recovery never sends another prompt.
+
+The read-only Go dashboard can still show T3 task metadata and a saved diff, but
+the conversation, tools, approvals and prompts belong in T3. The optional Linear
+bridge currently supports native tasks only and refuses T3 configuration.
+Real-phone/Grok-host installation, native-app access and phone-to-PR acceptance
+remain separate from local browser/lifecycle verification.
 
 ## Configuration
 

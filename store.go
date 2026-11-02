@@ -24,6 +24,7 @@ func randomID() string {
 }
 
 type Task struct {
+	Backend      string `json:"backend,omitempty"`
 	Ticket       string `json:"ticket"`
 	User         string `json:"user"`
 	Provider     string `json:"provider"`
@@ -79,7 +80,8 @@ func openState(root string) (*State, error) {
 CREATE TABLE IF NOT EXISTS profiles(user TEXT PRIMARY KEY,version TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tasks(ticket TEXT PRIMARY KEY,user TEXT NOT NULL,provider TEXT NOT NULL,org TEXT NOT NULL,name TEXT UNIQUE NOT NULL,box TEXT UNIQUE,phase TEXT NOT NULL,version TEXT,conversation TEXT,pr TEXT,repo TEXT,base TEXT,branch TEXT,adopted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS leases(user TEXT PRIMARY KEY,ticket TEXT NOT NULL UNIQUE);
-CREATE TABLE IF NOT EXISTS turns(ticket TEXT PRIMARY KEY,conversation TEXT NOT NULL,job TEXT NOT NULL,mode TEXT NOT NULL,status TEXT NOT NULL,note TEXT NOT NULL DEFAULT '');`)
+CREATE TABLE IF NOT EXISTS turns(ticket TEXT PRIMARY KEY,conversation TEXT NOT NULL,job TEXT NOT NULL,mode TEXT NOT NULL,status TEXT NOT NULL,note TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS t3_tasks(ticket TEXT PRIMARY KEY, model TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '', nonce TEXT NOT NULL DEFAULT '');`)
 	if err != nil {
 		return fail(err)
 	}
@@ -102,11 +104,31 @@ func (s *State) Task(ticket string) (Task, error) {
 	if err == sql.ErrNoRows {
 		return t, errors.New("unknown task")
 	}
+	if err == nil {
+		var n int
+		err = s.DB.QueryRow("SELECT count(*) FROM t3_tasks WHERE ticket=?", ticket).Scan(&n)
+		if n == 1 {
+			t.Backend = "t3"
+		}
+	}
 	return t, err
 }
 func (s *State) Save(t Task) error {
-	_, e := s.DB.Exec(`INSERT INTO tasks(ticket,user,provider,org,name,box,phase,version,conversation,pr,repo,base,branch,adopted) VALUES(?,?,?,?,?,nullif(?,''),?,nullif(?,''),nullif(?,''),nullif(?,''),nullif(?,''),nullif(?,''),nullif(?,''),?) ON CONFLICT(ticket) DO UPDATE SET box=excluded.box,phase=excluded.phase,version=excluded.version,conversation=excluded.conversation,pr=excluded.pr,repo=excluded.repo,base=excluded.base,branch=excluded.branch`, t.Ticket, t.User, t.Provider, t.Org, t.Name, t.Box, t.Phase, t.Version, t.Conversation, t.PR, t.Repo, t.Base, t.Branch, t.Adopted)
-	return e
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if t.Backend == "t3" {
+		if _, e := tx.Exec("INSERT OR IGNORE INTO t3_tasks(ticket) VALUES(?)", t.Ticket); e != nil {
+			return e
+		}
+	}
+	_, e := tx.Exec(`INSERT INTO tasks(ticket,user,provider,org,name,box,phase,version,conversation,pr,repo,base,branch,adopted) VALUES(?,?,?,?,?,nullif(?,''),?,nullif(?,''),nullif(?,''),nullif(?,''),nullif(?,''),nullif(?,''),nullif(?,''),?) ON CONFLICT(ticket) DO UPDATE SET box=excluded.box,phase=excluded.phase,version=excluded.version,conversation=excluded.conversation,pr=excluded.pr,repo=excluded.repo,base=excluded.base,branch=excluded.branch`, t.Ticket, t.User, t.Provider, t.Org, t.Name, t.Box, t.Phase, t.Version, t.Conversation, t.PR, t.Repo, t.Base, t.Branch, t.Adopted)
+	if e != nil {
+		return e
+	}
+	return tx.Commit()
 }
 func (s *State) Version(user string) (string, error) {
 	var v string

@@ -34,6 +34,7 @@ type StartResult struct {
 	ID   string `json:"conversationId"`
 	Job  string `json:"jobId"`
 	Turn int    `json:"turn"`
+	URL  string `json:"url,omitempty"`
 }
 type Client interface {
 	Call(any, ...string) error

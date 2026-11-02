@@ -2,11 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"github.com/gofrs/flock"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Runner struct {
@@ -14,6 +18,7 @@ type Runner struct {
 	Client      Client
 	Secrets     Secrets
 	Supervision string
+	Config      Config
 }
 
 var errOwnershipMismatch = errors.New("VM ownership or credential isolation mismatch")
@@ -48,7 +53,7 @@ func (r *Runner) Create(ticket string, c Config, bootstrap bool) (Task, error) {
 		if e != nil {
 			return t, e
 		}
-		if t.User != c.User || t.Org != c.Org || t.Provider != c.Provider {
+		if t.User != c.User || t.Org != c.Org || t.Provider != c.Provider || (t.Backend == "t3") != (c.Backend == "t3") {
 			return t, errors.New("task already belongs to another identity or provider")
 		}
 		if t.Phase == "creating" || t.Phase == "created" {
@@ -63,7 +68,7 @@ func (r *Runner) Create(ticket string, c Config, bootstrap bool) (Task, error) {
 	if c.Provider == "codex" && v == "" && !bootstrap {
 		return Task{}, errors.New("bootstrap dedicated Codex login first")
 	}
-	t := Task{Ticket: ticket, User: c.User, Provider: c.Provider, Org: c.Org, Name: strings.ToLower(ticket) + "-" + r.State.Namespace[:8], Phase: "creating"}
+	t := Task{Backend: c.Backend, Ticket: ticket, User: c.User, Provider: c.Provider, Org: c.Org, Name: strings.ToLower(ticket) + "-" + r.State.Namespace[:8], Phase: "creating"}
 	if len(t.Name) > 63 {
 		return t, errors.New("task ID too long for VM name")
 	}
@@ -81,6 +86,8 @@ func (r *Runner) Create(ticket string, c Config, bootstrap bool) (Task, error) {
 	args := []string{"create", "--name", t.Name, "--org", t.Org, "--no-vault", "--secrets", selected, "--vcpus", strconv.Itoa(c.VCPUs), "--mem-mib", strconv.Itoa(c.Memory), "--auto-suspend", idle, "--max-run-minutes", "60", "--fail-fast", "--meta", "ticket=" + ticket, "--meta", "controller=" + r.State.Namespace}
 	if c.Snapshot != "" {
 		args = append(args, "--snapshot", c.Snapshot)
+	} else if c.Backend == "t3" {
+		args = append(args, "--template", "t3")
 	}
 	var b Box
 	if e = r.Client.Call(&b, args...); e != nil {
@@ -165,6 +172,7 @@ func (r *Runner) Bootstrap(c Config) (Task, error) {
 	// Auth bootstrap never inherits repo Secrets or a user-supplied snapshot.
 	c.Secrets = nil
 	c.Snapshot = ""
+	c.Backend = "native"
 	t, e := r.Create("AUTH-"+c.User, c, true)
 	if e != nil {
 		return t, e
@@ -210,6 +218,11 @@ func (r *Runner) Activate(ticket string) (Task, error) {
 		} else if b.State != "running" {
 			e = errors.New("active VM is not running; inspect before restarting")
 		}
+		if e == nil && t.Backend == "t3" && t.Conversation != "" {
+			if e = r.startT3(t); e == nil {
+				e = r.armT3(t)
+			}
+		}
 		return t, e
 	}
 	t.Phase = "restoring"
@@ -241,7 +254,15 @@ func (r *Runner) Activate(ticket string) (Task, error) {
 		t.Version = v
 	}
 	t.Phase = "active"
-	return t, r.State.Save(t)
+	if e = r.State.Save(t); e != nil {
+		return t, e
+	}
+	if t.Backend == "t3" && t.Conversation != "" {
+		if e = r.startT3(t); e == nil {
+			e = r.armT3(t)
+		}
+	}
+	return t, e
 }
 func (r *Runner) conversations(box string) ([]Conversation, error) {
 	var v struct {
@@ -258,11 +279,14 @@ func (r *Runner) Run(ticket, prompt, cwd, model string) (StartResult, error) {
 	if strings.TrimSpace(prompt) == "" || len(prompt) > 256*1024 {
 		return result, errors.New("task text must contain 1 to 262144 bytes")
 	}
+	if t, err := r.State.Task(ticket); err == nil && t.Backend == "t3" {
+		return r.runT3(t, prompt, model)
+	}
 	t, e := r.Activate(ticket)
 	if e != nil {
 		return result, e
 	}
-	check := `set -e; set +u; test "${CODEX_HOME:-/data/home/.codex}" = /data/home/.codex; test "${CLAUDE_CONFIG_DIR:-/data/home/.claude}" = /data/home/.claude; for name in OPENAI_API_KEY CODEX_API_KEY CODEX_ACCESS_TOKEN OPENAI_BASE_URL ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY; do test -z "${!name}" || exit 1; done`
+	check := officialEnvironmentCheck
 	if _, e = r.Client.Shell(t.Box, check); e != nil {
 		return result, e
 	}
@@ -332,6 +356,9 @@ func (r *Runner) RecoverTurn(ticket, conv string) (Task, error) {
 	}
 	if t.Phase != "starting-turn" {
 		return t, errors.New("task has no uncertain turn")
+	}
+	if t.Backend == "t3" {
+		return r.recoverT3(t, conv)
 	}
 	vs, e := r.conversations(t.Box)
 	if e != nil {
@@ -418,6 +445,16 @@ func (r *Runner) Checkpoint(ticket string) (Task, error) {
 	if e != nil {
 		return t, e
 	}
+	if t.Backend == "t3" {
+		gate := flock.New(filepath.Join(r.State.Root, "t3-"+t.Ticket+".lock"))
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		ok, err := gate.TryLockContext(ctx, 100*time.Millisecond)
+		if err != nil || !ok {
+			return t, errors.New("T3 gateway connection still opening; retry checkpoint without clearing its lease")
+		}
+		defer gate.Unlock()
+	}
 	b, e := r.owned(t)
 	if e != nil {
 		return t, e
@@ -446,6 +483,11 @@ func (r *Runner) Checkpoint(ticket string) (Task, error) {
 		}
 	}
 	if t.Phase == "active" {
+		if t.Backend == "t3" {
+			if e = r.quiesceT3(t); e != nil {
+				return t, e
+			}
+		}
 		vs, e := r.conversations(t.Box)
 		if e != nil {
 			return t, e

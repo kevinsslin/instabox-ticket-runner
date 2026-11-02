@@ -5,7 +5,9 @@ from your phone, pause the VM between revisions, and continue in the same workin
 branch and conversation.
 
 ```text
-Phone → your bot / controller host → Instabox task VM
+Phone / T3 Code ← private HTTPS → Go controller ← SSH → Instabox task VM
+                          ↑                              T3 + Codex
+                       your bot
 ```
 
 Use any issue tracker or a plain prompt. A task ID is just your chosen identifier,
@@ -56,25 +58,54 @@ key without printing it and refuses to replace one. Existing installations shoul
 reuse their provisioned key. [Operations](docs/operations.md) covers desktop
 stores, private repositories, configuration and recovery.
 
-## Run a task
+## Run a task with T3 Code
 
-Write the request and acceptance criteria into a private text file on the host.
+Start `ib-ticket supervise` as a persistent host service using the commands below
+before dispatch. Write the request and acceptance criteria into a private text
+file on the host.
 
 ```sh
 ib-ticket create --task fix-login
 ib-ticket prepare fix-login
-ib-ticket run fix-login --cwd /data/home/workspace --prompt-file /private/task.txt
+ib-ticket run fix-login --model gpt-6.1-sol --prompt-file /private/task.txt
 ib-ticket status fix-login
-instabox agent events VM_ID -c CONVERSATION_ID -f
+
 # With the host supervisor installed, checkpoint runs automatically.
 # Inspect one recorded turn (when no supervisor daemon is running):
 # Start it with run ... --supervision external, then use:
 # ib-ticket watch fix-login
 ```
 
-Use the VM and conversation IDs returned by the controller. Follow events until
-the turn finishes, inspect the diff and tests, then checkpoint. Request revisions
-with another `run` for the same task ID. A successful start is not task completion.
+With `backend: t3`, `run` returns the original T3 thread/run IDs and a task URL
+when `t3_public_url` is configured. The first run needs an explicit Codex model;
+revisions reuse it. The VM runs pinned T3 0.1.6 and the controller remains Go.
+Open the private T3 UI to read the conversation, inspect tools/diffs, answer
+approvals, and send follow-up prompts to that same thread. No UI fork is bundled.
+
+Start the gateway after creating the task:
+
+```sh
+ib-ticket ui fix-login --password-file "$HOME/.config/instabox-ticket-runner/dashboard-password"
+# Inspect existing Serve mappings first; choose an unused HTTPS port.
+tailscale serve --https=8443 --bg http://127.0.0.1:8788
+```
+
+Use the password setup below and set `t3_public_url` to the actual private HTTPS
+origin before dispatch. Open `/_ib/connect` on that origin once to pair this
+browser, then use the task link. Pairing happens privately in the browser; the
+bot never needs to send a token in chat. T3 sessions and gateway authentication
+are separate. After automatic pause, reload the task page and press **Resume in
+T3 Code**. This restores login and the same conversation. Revisions through the
+bot use another `run` with the same task ID.
+
+For a persistent gateway, install [the task service](docs/operations.md#t3-code).
+Each task gateway needs its own origin/listener/config; the supplied service is
+one task slot. Do not point a saved task URL at a different task VM.
+
+For the original backend, set `backend: native` in private YAML. It uses native
+Instabox agent conversations and the optional read-only dashboard below. Native
+Claude remains available; this T3 adapter currently supports Codex only. Existing
+native tasks keep their backend and cannot be converted in place.
 
 Start `ib-ticket supervise` as a persistent host service before dispatching.
 It records and watches exact turn/job IDs, then checkpoints automatically after
@@ -100,7 +131,7 @@ host's existing service manager on other systems. Check service startup before
 sending tasks. To survive user logout, the host must support persistent user
 services (systemd linger, configured by its administrator).
 
-Completion uses a native `agent events -f` follower per running turn. Startup and
+For native tasks, completion uses an `agent events -f` follower per turn. Startup and
 stream closure trigger small status reads, with a five-minute safety reconciliation
 for stalled connections. Verified completion triggers live safety checks,
 observation capture and credential storage. There is no fixed stop-time guarantee
@@ -112,7 +143,7 @@ it does not repeatedly download remote events while a follower is connected.
 Disconnected followers use bounded backoff and jitter. The host supervisor fails
 closed and marks attention when completion or storage is uncertain. Never automatically retry a lost agent start.
 
-## Monitor from your phone
+## Optional native task dashboard
 
 The built-in Go dashboard shows tasks, VM/agent state, native messages and tool
 results, command output/exit codes, tracked diffs and a recorded PR link. It is
@@ -150,24 +181,22 @@ private saved observation. The page labels it as historical, not live.
 For a persistent Linux dashboard and private phone access, see
 [host services and Tailscale](docs/operations.md#host-services-and-tailscale).
 
-## T3 Code trial
+## T3 lifecycle limits
 
-[T3 Code](https://github.com/pingdotgg/t3code) provides an existing interactive
-web/mobile interface for coding agents. It is an optional integration candidate;
-this CLI currently dispatches Instabox native agents, not T3 threads.
+T3's browser streams its own conversation. The Go supervisor's T3 lifecycle
+follower receives Linux filesystem notifications for T3's durable SQLite events;
+it does not use `t3 --wait` polling or claim an upstream server subscription.
+A five-minute safety read covers missed notifications. Before checkpoint, a
+Linux systemd/cgroup-v2 guest guard freezes input and providers, verifies all
+runs, queued/pending work and finalization, then stops the idle process group.
+The normal encrypted-save/readback, auth removal, VM pause and lease rules still
+apply. Unknown schema, background jobs or unavailable credentials preserve work.
 
-An isolated T3 0.1.6/Codex trial verified CLI dispatch, a web follow-up, passing
-Go tests, and continuing the same thread after stopping T3, saving/removing login,
-pausing the VM and restoring login. The lifecycle steps were manual. A 390px
-browser viewport was checked; real-phone access and bot-host deployment remain
-unverified. T3 server RSS was roughly 380–430 MiB in this trial, excluding Codex
-and other VM processes; this is not a capacity guarantee.
-
-T3 owns its agent sessions. Its persistent provider processes need a separate
-completion/quiescence adapter before the runner can checkpoint them. Do not
-attach the native supervisor to T3 jobs or treat `t3 thread ... --wait` as pure
-server push. Read [T3 trial boundaries](docs/operations.md#t3-trial-boundaries)
-before trying it on your host.
+This adapter is pinned to T3 0.1.6 internals. Upgrade and test the guard together
+with T3; do not independently update a task server. The UI is the original T3
+web app behind a private gateway. Native iOS/Android app pairing through this
+Basic-auth gateway and the complete phone-to-Grok-to-PR flow remain unverified.
+See [T3 operations](docs/operations.md#t3-code) for setup, recovery and constraints.
 
 ## Optional Linear agent
 
@@ -195,12 +224,13 @@ continue to work without Linear.
 > skills/instabox-ticket/SKILL.md, then follow the bot self-install procedure in
 > docs/operations.md. Preserve existing config, keys and state. Use private YAML
 > and encrypted-file storage. Guide me through official login without requesting
-> tokens in chat. Run the supervisor and dashboard as persistent services; use
+> tokens in chat. Use backend: t3 for new Codex tasks. Run the supervisor and
+> task-specific T3 UI gateway as persistent services; use
 > Tailscale Serve for private phone access when available. Verify a small task,
 > automatic checkpoint and same-task revision while my laptop is offline, then
 > return the monitor URL and evidence. Record verified PR links with link-pr;
-> publish only within the task's scope. Keep T3 as a separate trial until its
-> runner adapter exists. Report missing host capabilities or repository access.
+> publish only within the task's scope. Preserve existing native tasks and leases.
+> Do not convert them in place. Report missing capabilities or repository access.
 
 Link [the skill directory](skills/instabox-ticket) into your agent's supported
 skill discovery path after building the binary. For Grok installations using

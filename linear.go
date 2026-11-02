@@ -162,6 +162,9 @@ func runLinear(root, config string, args []string) error {
 	if c.User == "" || c.Org == "" || c.Repo == "" {
 		return errors.New("configure one fixed profile, org and repository for the Linear bridge")
 	}
+	if c.Backend == "t3" {
+		return errors.New("Linear bridge currently supports native tasks; use the T3 UI and bot CLI for T3 tasks")
+	}
 	// Initialize under the existing controller lock, then release it immediately.
 	state, e := openState(expandHome(root))
 	if e != nil {

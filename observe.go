@@ -242,7 +242,14 @@ func (o *observer) collect(t Task) observation {
 		v.Notes = append(v.Notes, "VM is not running. Observation will not resume it; live events and diff are unavailable.")
 		return v
 	}
-	if t.Conversation != "" {
+	if t.Backend == "t3" && t.Conversation != "" {
+		if state, err := t3GuestState(o.client, t, "status"); err == nil {
+			v.Status = state.Status
+		} else {
+			v.Notes = append(v.Notes, "T3 state unavailable; inspect the task's T3 UI.")
+		}
+		v.Notes = append(v.Notes, "This task uses T3 Code. Open its private T3 link for conversation, tools, approvals and prompts.")
+	} else if t.Conversation != "" {
 		var events struct {
 			Status   string            `json:"status"`
 			ExitCode *int              `json:"exitCode"`

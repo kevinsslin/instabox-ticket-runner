@@ -33,6 +33,25 @@ The server has a read-only SQLite connection and no browser mutation endpoints.
 It checks VM ownership before collecting guest data and never resumes a VM.
 Hostile task code can falsify command output or diffs; inspect PR evidence yourself.
 
+The optional T3 gateway is an interactive surface. It binds to loopback behind
+private HTTPS and requires the separate gateway password plus a T3 browser
+session. Its fixed task/VM mapping is not browser-controlled. Only explicit,
+same-origin, CSRF-protected actions resume a VM or mint a short-lived pairing;
+background reconnects never resume it. Pairing credentials are delivered only to
+the authenticated browser and consumed by T3. Pairing uses SSH so credential
+output does not enter Instabox exec history. Do not share task origins between
+unrelated task VMs. The original T3 web app controls its own content/security
+policy. Native mobile apps through this gateway have not been verified.
+
+T3 runs in a dedicated Linux systemd cgroup. The pinned guard reads T3's private
+SQLite state without modifying it, freezes admissions and provider processes,
+checks queued/pending/finalization work and unknown processes, then kills the
+idle group before checkpointing credentials. It depends on T3 0.1.6's schema
+and crash recovery; upgrade both together. Unsupported state/processes preserve
+credentials and the lease. T3's service console is suppressed because its normal
+startup prints pairing credentials. Its durable logs/transcripts and all task
+disks remain private sensitive data, separate from encrypted login bundles.
+
 The optional Linear bridge accepts only signed, fresh Agent Session callbacks
 for configured workspace/app/team/human IDs. It persists delivery IDs and dispatch
 intent to avoid automatic replay after uncertain operations. Its OAuth token and

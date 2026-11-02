@@ -91,6 +91,22 @@ func runSupervisor(root, config, action string, args []string) error {
 			}
 			current := turn
 			if streams.start(key, func(ctx context.Context) error {
+				t, err := watcher.state.Task(current.Task)
+				if err != nil {
+					return err
+				}
+				if t.Backend == "t3" {
+					return awaitCompletion(ctx, func() (bool, error) { return watcher.inspect(current) }, func(ctx context.Context) error {
+						return watcher.client.(interface {
+							FollowT3(context.Context, string, string, string) error
+						}).FollowT3(ctx, t.Box, t.Conversation, func() string {
+							if current.Status == "awaiting-input" {
+								return current.Job
+							}
+							return ""
+						}())
+					}, streamSleep)
+				}
 				follower := watcher.client.(eventFollower)
 				return awaitCompletion(ctx, func() (bool, error) { return watcher.inspect(current) }, func(ctx context.Context) error {
 					t, err := watcher.state.Task(current.Task)
@@ -105,7 +121,7 @@ func runSupervisor(root, config, action string, args []string) error {
 		}
 		return nil
 	}
-	fmt.Fprintln(os.Stderr, "Supervisor active: following native event streams; durable state and live checks decide checkpoint.")
+	fmt.Fprintln(os.Stderr, "Supervisor active: native streams / T3 durable-event notifications; live checks decide checkpoint.")
 	if e = discover(); e != nil {
 		return e
 	}
@@ -152,7 +168,7 @@ func (s *supervisor) turns(task string) ([]supervisedTurn, error) {
 		query += " WHERE ticket=?"
 		args = append(args, task)
 	} else {
-		query += " WHERE mode='host' AND status='active'"
+		query += " WHERE mode='host' AND status IN ('active','awaiting-input')"
 	}
 	rows, e := s.state.DB.Query(query, args...)
 	if e != nil {
@@ -198,6 +214,22 @@ func (s *supervisor) inspect(turn supervisedTurn) (bool, error) {
 	// cached process state for completion. Explicit watch can be retried after recovery.
 	if b.State != "running" {
 		return false, errors.New("VM paused or stopped before checkpoint; inspect and activate the existing task")
+	}
+	if t.Backend == "t3" {
+		v, err := t3GuestState(s.client, t, "status")
+		if err != nil {
+			return false, errReconcileRetry
+		}
+		if v.Busy || (turn.Status == "awaiting-input" && v.Run == turn.Job) {
+			return false, nil
+		}
+		if err = s.checkpoint(t.Ticket); err != nil {
+			if errors.Is(err, errT3Busy) || err.Error() == "controller busy" {
+				return false, errReconcileRetry
+			}
+			return false, err
+		}
+		return true, nil
 	}
 	events, e := readNativeTurn(s.client, t, turn.Job)
 	if e != nil {

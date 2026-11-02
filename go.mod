@@ -4,6 +4,7 @@ go 1.26.10
 
 require (
 	github.com/99designs/keyring v1.2.2
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gofrs/flock v0.12.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.42.2
