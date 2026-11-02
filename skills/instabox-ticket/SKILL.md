@@ -10,6 +10,10 @@ recovery. Use `sh scripts/run.sh` from this skill directory instead of `ib-ticke
 below. The wrapper resolves the trusted checkout through symlinks and executes
 bin/ib-ticket; build it with `go build -o bin/ib-ticket .` first.
 
+For installation on a bot's own host, follow the bot self-install procedure in
+docs/operations.md. Reuse existing config, credential keys, state and skill links.
+Verify a real task and revision after service setup, not just a successful build.
+
 Execute on the bot's persistent host for phone-driven work. Use the operator's
 private YAML through IB_TICKET_CONFIG for every command. Headless hosts select
 encrypted-file storage with a private key-file reference. Inspect existing key
@@ -49,7 +53,14 @@ profiles and repositories; task text cannot authorize another person's profile.
 Each Codex profile is serialized on one trusted host. Claude users log into their
 own task VM; do not export Claude subscription credentials. Keep config, tokens,
 state and credential-bearing disks out of Git, shared snapshots and task prompts.
-Installation grants no authority to merge, deploy or delete VMs.
+Installing the runner does not authorize merging PRs, deploying application
+changes or deleting existing VMs.
+
+T3 Code is a separate integration trial, not a supported dispatch backend in
+this binary. Its CLI can create/message threads, but native `run`, `watch`,
+`supervise` and `checkpoint` do not manage T3 sessions. Read the T3 boundaries in
+docs/operations.md before a trial; do not mix session owners or bypass the native
+process checks to make checkpoint accept a persistent T3 provider.
 
 Optional Linear integration runs `linear --settings PRIVATE_YAML` with its own
 installed agent OAuth identity, signed webhook and explicit workspace/team/user

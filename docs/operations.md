@@ -5,6 +5,115 @@ credential versions and leases there; Instabox runs the coding agent. Your phone
 is the control surface. No additional public API is needed when the bot can
 already execute commands on that host.
 
+## Bot self-install
+
+Run on the bot's existing persistent host under its trusted service account.
+An SSH connection from the operator's laptop is not required. Inspect existing
+checkouts, `ib-ticket`, Instabox login, private configuration, key provisioning,
+state and service units before installing. Update an existing checkout without
+discarding local work. Record the checked-out commit; v0.1.0 is still a draft.
+
+Build using README's Go requirement and run `ib-ticket --help`. Install the
+binary in `~/.local/bin`. Link the existing skill directory into the bot's
+documented skill path, preserving an existing link or installation. A bot with
+shell access can also call the binary directly; skill support is optional.
+
+Keep the configuration at `~/.config/instabox-ticket-runner/config.yaml`, mode
+0600, and its directory mode 0700. Fill in the operator's allowed profile,
+Instabox org, repo and plan-supported size. Use the encrypted-file backend and
+the separate private key path in the example. Preserve provisioned keys and
+existing state. Initialize a key only for a new installation. Keep
+`IB_TICKET_CONFIG` in the bot service's environment as well as interactive shells.
+
+Check actual Instabox access on this host. If sign-in is needed, use its official
+device/agent login and relay only the intended approval URL and one-time code.
+Model authorization is separate: follow README's clean Codex bootstrap and
+checkpoint flow. The owner completes official sign-in. Do not request token/key
+values in chat or copy another host's live login cache. Inspect existing org
+Secret names for repository access before requesting new provisioning.
+
+Install and start the supervisor from README, and the optional dashboard service
+below. Check both service status and private logs. On hosts without systemd user
+services, use the host's existing persistent process manager with the same
+commands, environment and private paths. A process tied to the bot's current
+shell is insufficient. Verify persistence across logout/restart; systemd user
+services may require administrator-enabled linger.
+
+For acceptance, use one small authorized task in the configured repo. Record
+the task/VM/conversation/job IDs, verify its changes and tests, and confirm that
+the supervisor saved the observation, checkpointed and paused the VM without
+operator intervention. Submit a revision using the same task and verify the same
+VM, branch and conversation continue. The operator then verifies the HTTPS task
+view from a real phone with their laptop offline. Report these results separately
+from build/service startup. Create a PR only when authorized by that task.
+
+## Host services and Tailscale
+
+After configuring the private dashboard password using README's non-overwriting
+step, install its service beside the supervisor:
+
+```sh
+cp deploy/ib-ticket-dashboard.service "$HOME/.config/systemd/user/"
+systemctl --user daemon-reload
+systemctl --user enable --now ib-ticket-dashboard
+systemctl --user status ib-ticket-dashboard
+```
+
+Both supplied units expect `ib-ticket` in `~/.local/bin` and the default private
+config path. The dashboard listens on `127.0.0.1:8787`; Basic authentication still
+applies behind a private proxy. Store/retrieve its password through the operator's
+password manager or existing secure channel, not ordinary bot messages.
+
+For private access, join the bot host and phone to the operator's intended
+Tailscale network using its normal authorization flow. If it already has a Serve
+configuration, inspect it before adding a route so an existing service is not
+replaced. On a host with no conflicting mapping:
+
+```sh
+tailscale serve --bg http://127.0.0.1:8787
+tailscale serve status
+```
+
+Return the actual HTTPS address reported by Tailscale, appending `/#TASK_ID`
+with a URL-encoded task ID. The phone needs Tailscale connected to that network.
+The task VMs do not need to join it: the controller reaches them through
+Instabox. Serve is private to the tailnet; Funnel is public and is not needed
+for this setup. Keep the bot host and its services running independently of the
+phone connection. An existing authenticated HTTPS reverse proxy is also suitable.
+
+## T3 trial boundaries
+
+The proposed division is: the controller owns VM/auth lifecycle; T3 owns the
+agent thread; the bot and human target that same thread. This adapter is not
+implemented. Production dispatch continues to use the native backend.
+
+For a separately authorized trial, use an isolated VM/repository and independent
+official login. Inspect the account's available template and size, disable Vault
+and unrelated Secrets, and set plan-supported idle and runtime limits. Keep
+credentials out of shared snapshots. Pin the T3 version and check both CLI and
+running server versions: updating a CLI does not necessarily replace an Instabox
+template's existing service launcher. Use T3's documented authenticated pairing
+and a private tunnel/network for access. CLI/browser pairing credentials are
+separate from model login; keep both out of logs and ordinary chat.
+
+T3 can launch through `t3 thread start` and continue through `t3 thread send`.
+Use the installed version's help and explicit provider/model when no project
+default exists. Persist returned thread/run IDs before any retry; a lost response
+does not authorize starting another thread. The tested 0.1.6 CLI's `--wait` uses
+bounded blocking wait slices. Its exit alone is not proof of safe VM suspension.
+
+Before automating checkpoint, an adapter must account for active/queued runs,
+pending approvals/questions, finalization, and a human sending another prompt
+while completion is being processed. It must quiesce admissions and provider
+processes, retain uncertain work, and recover the exact thread after restart.
+An idle status read followed by killing T3 has a race with new user input.
+Do not weaken native process/credential checks to bridge that gap.
+
+Keep trial results distinct: a desktop browser at phone width is not real-phone
+acceptance; a manual encrypted-save/resume test is not integration with
+`ib-ticket checkpoint`. Until the adapter is implemented and verified, manage
+trial VM shutdown explicitly and use idle/runtime limits only as a cost backup.
+
 ## Configuration
 
 Select private YAML with `IB_TICKET_CONFIG` or `--config PATH`. Precedence is

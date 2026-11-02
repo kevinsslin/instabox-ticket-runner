@@ -121,8 +121,9 @@ read only. There is no frontend build or separate database service.
 Generate a separate dashboard password on the bot host, outside the checkout:
 
 ```sh
-umask 077
-openssl rand -hex 24 > "$HOME/.config/instabox-ticket-runner/dashboard-password"
+if ! test -e "$HOME/.config/instabox-ticket-runner/dashboard-password"; then
+  (umask 077; set -C; openssl rand -hex 24 > "$HOME/.config/instabox-ticket-runner/dashboard-password")
+fi
 ib-ticket serve --password-file "$HOME/.config/instabox-ticket-runner/dashboard-password"
 ```
 
@@ -145,6 +146,28 @@ truncated. Logs and diffs are private work, visible to anyone with dashboard acc
 
 After checkpoint, the latest bounded events and diff remain available as a
 private saved observation. The page labels it as historical, not live.
+
+For a persistent Linux dashboard and private phone access, see
+[host services and Tailscale](docs/operations.md#host-services-and-tailscale).
+
+## T3 Code trial
+
+[T3 Code](https://github.com/pingdotgg/t3code) provides an existing interactive
+web/mobile interface for coding agents. It is an optional integration candidate;
+this CLI currently dispatches Instabox native agents, not T3 threads.
+
+An isolated T3 0.1.6/Codex trial verified CLI dispatch, a web follow-up, passing
+Go tests, and continuing the same thread after stopping T3, saving/removing login,
+pausing the VM and restoring login. The lifecycle steps were manual. A 390px
+browser viewport was checked; real-phone access and bot-host deployment remain
+unverified. T3 server RSS was roughly 380–430 MiB in this trial, excluding Codex
+and other VM processes; this is not a capacity guarantee.
+
+T3 owns its agent sessions. Its persistent provider processes need a separate
+completion/quiescence adapter before the runner can checkpoint them. Do not
+attach the native supervisor to T3 jobs or treat `t3 thread ... --wait` as pure
+server push. Read [T3 trial boundaries](docs/operations.md#t3-trial-boundaries)
+before trying it on your host.
 
 ## Optional Linear agent
 
@@ -169,12 +192,15 @@ continue to work without Linear.
 ## Give it to your bot
 
 > Install this repository on your own persistent host. Read README.md and
-> skills/instabox-ticket/SKILL.md. Use my private YAML and encrypted-file storage;
-> inspect existing access and key provisioning before creating anything. Guide
-> me through official login without asking for tokens in chat. Verify a task,
-> checkpoint and revision while my laptop is offline. Return the configured
-> dashboard task link and record verified PR links with link-pr. Report missing background
-> execution or repository permissions. Publish a PR only within the task's scope.
+> skills/instabox-ticket/SKILL.md, then follow the bot self-install procedure in
+> docs/operations.md. Preserve existing config, keys and state. Use private YAML
+> and encrypted-file storage. Guide me through official login without requesting
+> tokens in chat. Run the supervisor and dashboard as persistent services; use
+> Tailscale Serve for private phone access when available. Verify a small task,
+> automatic checkpoint and same-task revision while my laptop is offline, then
+> return the monitor URL and evidence. Record verified PR links with link-pr;
+> publish only within the task's scope. Keep T3 as a separate trial until its
+> runner adapter exists. Report missing host capabilities or repository access.
 
 Link [the skill directory](skills/instabox-ticket) into your agent's supported
 skill discovery path after building the binary. For Grok installations using
